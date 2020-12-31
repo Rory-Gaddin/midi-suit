@@ -1,0 +1,2709 @@
+   1               		.file	"Main.c"
+   2               	__SP_H__ = 0x3e
+   3               	__SP_L__ = 0x3d
+   4               	__SREG__ = 0x3f
+   5               	__tmp_reg__ = 0
+   6               	__zero_reg__ = 1
+   8               		.text
+   9               	.Ltext0:
+ 125               	.global	spi_mode
+ 127               	spi_mode:
+   1:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** #include <stdio.h>
+   2:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** #include <avr/io.h>
+   3:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** #include <stdlib.h>
+   4:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** #include <string.h>
+   5:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** #include <avr/eeprom.h>
+   6:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 
+   7:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** #include <util/delay.h>
+   8:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** #include "uart.h"
+   9:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** #include <avr/interrupt.h>
+  10:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** #include <stdbool.h>
+  11:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** #include <avr/wdt.h>
+  12:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 
+  13:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** #define UART_BAUD_RATE      57600
+  14:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** #define F_CPU 16000000
+  15:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 
+  16:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** //TLV
+  17:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** // Port B
+  18:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** #define MOSI	5
+  19:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** #define MISO	6
+  20:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** #define SCK		7
+  21:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** #define CS1		4	// CS for TLV #1
+  22:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** #define CS2		3	// CS for TLV #2
+  23:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 
+  24:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** #define DEBUG	// Debugging UART output
+  25:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 
+  26:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 
+  27:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** struct jointMapping {
+  28:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 	char magic[2];
+  29:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 	char device[8];
+  30:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 	char function[8];
+  31:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 	uint16_t lowIn;		// ADC reading - low end
+  32:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 	uint16_t highIn;		// ADC reading - high end
+  33:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 	uint8_t lowOut;		// Mapped value - low end
+  34:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 	uint8_t highOut;		// Mapped value - high end
+  35:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 	uint8_t cc;			// CC 
+  36:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 	uint8_t channel;		// MIDI Channel to output on
+  37:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** }; //	Struct size of 24 bytes
+  38:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 
+  39:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** uint16_t adcBuffer[22];
+  40:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** uint16_t adcLast[22];
+  41:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** const uint8_t deadband = 4;
+  42:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 
+  43:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** void spi_mode(unsigned char config) {
+ 129               	.LM0:
+ 130               	.LFBB1:
+ 131               	/* prologue: function */
+ 132               	/* frame size = 0 */
+ 133               	/* stack size = 0 */
+ 134               	.L__stack_usage = 0
+  44:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 	// enable SPI master with configuration byte specified
+  45:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 	SPCR = (1 << SPE) | (1 << MSTR) | (1 << SPR1) | (1 << SPR0);
+ 136               	.LM1:
+ 137 0000 83E5      		ldi r24,lo8(83)
+ 138 0002 8CBD      		out 0x2c,r24
+  46:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 	SPSR = 0x00;
+ 140               	.LM2:
+ 141 0004 1DBC      		out 0x2d,__zero_reg__
+ 142 0006 0895      		ret
+ 144               	.Lscope1:
+ 147               	.global	spi_transfer
+ 149               	spi_transfer:
+  47:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** }
+  48:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 
+  49:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** unsigned char spi_transfer(unsigned char value) {
+ 151               	.LM3:
+ 152               	.LFBB2:
+ 153               	/* prologue: function */
+ 154               	/* frame size = 0 */
+ 155               	/* stack size = 0 */
+ 156               	.L__stack_usage = 0
+  50:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 	unsigned char x;
+  51:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 	SPDR = value;
+ 158               	.LM4:
+ 159 0008 8EBD      		out 0x2e,r24
+ 160               	.L4:
+  52:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 	while (!(SPSR & (1<<SPIF))) {}
+ 162               	.LM5:
+ 163 000a 0DB4      		in __tmp_reg__,0x2d
+ 164 000c 07FE      		sbrs __tmp_reg__,7
+ 165 000e 00C0      		rjmp .L4
+  53:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 	x  = SPDR;
+ 167               	.LM6:
+ 168 0010 8EB5      		in r24,0x2e
+  54:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 	return x;
+  55:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** }
+ 170               	.LM7:
+ 171 0012 0895      		ret
+ 176               	.Lscope2:
+ 178               	.global	readADC
+ 180               	readADC:
+  56:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 
+  57:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** uint16_t readADC() {
+ 182               	.LM8:
+ 183               	.LFBB3:
+ 184 0014 FF92      		push r15
+ 185 0016 0F93      		push r16
+ 186 0018 1F93      		push r17
+ 187 001a CF93      		push r28
+ 188 001c DF93      		push r29
+ 189               	/* prologue: function */
+ 190               	/* frame size = 0 */
+ 191               	/* stack size = 5 */
+ 192               	.L__stack_usage = 5
+  58:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 	// Chan 0-10
+  59:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 	uint8_t idx = 0;
+  60:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 	uint8_t chan;
+  61:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 	uint16_t ad;
+  62:/Users/anton/Desktop/AVR/MidiSuit/Main.c ****       uint8_t ad_l;
+  63:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 	PORTB &= ~(1 << CS1);
+ 194               	.LM9:
+ 195 001e 2C98      		cbi 0x5,4
+ 196               	.LBB72:
+ 197               	.LBB73:
+ 199               	.Ltext1:
+   1:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** /* Copyright (c) 2002, Marek Michalkiewicz
+   2:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    Copyright (c) 2004,2005,2007 Joerg Wunsch
+   3:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    Copyright (c) 2007  Florin-Viorel Petrov
+   4:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    All rights reserved.
+   5:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+   6:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    Redistribution and use in source and binary forms, with or without
+   7:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    modification, are permitted provided that the following conditions are met:
+   8:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+   9:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    * Redistributions of source code must retain the above copyright
+  10:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****      notice, this list of conditions and the following disclaimer.
+  11:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+  12:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    * Redistributions in binary form must reproduce the above copyright
+  13:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****      notice, this list of conditions and the following disclaimer in
+  14:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****      the documentation and/or other materials provided with the
+  15:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****      distribution.
+  16:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+  17:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    * Neither the name of the copyright holders nor the names of
+  18:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****      contributors may be used to endorse or promote products derived
+  19:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****      from this software without specific prior written permission.
+  20:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+  21:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+  22:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****   AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+  23:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****   IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+  24:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****   ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
+  25:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****   LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+  26:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****   CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+  27:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****   SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+  28:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****   INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+  29:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****   CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+  30:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****   ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+  31:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****   POSSIBILITY OF SUCH DAMAGE. */
+  32:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+  33:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** /* $Id$ */
+  34:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+  35:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** #ifndef _UTIL_DELAY_H_
+  36:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** #define _UTIL_DELAY_H_ 1
+  37:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+  38:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** #ifndef __HAS_DELAY_CYCLES
+  39:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** #define __HAS_DELAY_CYCLES 1
+  40:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** #endif
+  41:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+  42:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** #include <inttypes.h>
+  43:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** #include <util/delay_basic.h>
+  44:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** #include <math.h>
+  45:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+  46:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** /** \file */
+  47:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** /** \defgroup util_delay <util/delay.h>: Convenience functions for busy-wait delay loops
+  48:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****     \code
+  49:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****     #define F_CPU 1000000UL  // 1 MHz
+  50:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****     //#define F_CPU 14.7456E6
+  51:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****     #include <util/delay.h>
+  52:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****     \endcode
+  53:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+  54:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****     \note As an alternative method, it is possible to pass the
+  55:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****     F_CPU macro down to the compiler from the Makefile.
+  56:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****     Obviously, in that case, no \c \#define statement should be
+  57:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****     used.
+  58:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+  59:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****     The functions in this header file are wrappers around the basic
+  60:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****     busy-wait functions from <util/delay_basic.h>.  They are meant as
+  61:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****     convenience functions where actual time values can be specified
+  62:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****     rather than a number of cycles to wait for.  The idea behind is
+  63:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****     that compile-time constant expressions will be eliminated by
+  64:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****     compiler optimization so floating-point expressions can be used
+  65:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****     to calculate the number of delay cycles needed based on the CPU
+  66:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****     frequency passed by the macro F_CPU.
+  67:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+  68:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****     \note In order for these functions to work as intended, compiler
+  69:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****     optimizations <em>must</em> be enabled, and the delay time
+  70:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****     <em>must</em> be an expression that is a known constant at
+  71:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****     compile-time.  If these requirements are not met, the resulting
+  72:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****     delay will be much longer (and basically unpredictable), and
+  73:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****     applications that otherwise do not use floating-point calculations
+  74:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****     will experience severe code bloat by the floating-point library
+  75:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****     routines linked into the application.
+  76:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+  77:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****     The functions available allow the specification of microsecond, and
+  78:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****     millisecond delays directly, using the application-supplied macro
+  79:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****     F_CPU as the CPU clock frequency (in Hertz).
+  80:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+  81:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** */
+  82:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+  83:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** #if !defined(__DOXYGEN__)
+  84:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** static inline void _delay_us(double __us) __attribute__((always_inline));
+  85:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** static inline void _delay_ms(double __ms) __attribute__((always_inline));
+  86:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** #endif
+  87:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+  88:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** #ifndef F_CPU
+  89:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** /* prevent compiler error by supplying a default */
+  90:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** # warning "F_CPU not defined for <util/delay.h>"
+  91:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** # define F_CPU 1000000UL
+  92:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** #endif
+  93:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+  94:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** #ifndef __OPTIMIZE__
+  95:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** # warning "Compiler optimizations disabled; functions from <util/delay.h> won't work as designed"
+  96:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** #endif
+  97:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+  98:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** #if __HAS_DELAY_CYCLES && defined(__OPTIMIZE__) && \
+  99:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****   !defined(__DELAY_BACKWARD_COMPATIBLE__) &&	   \
+ 100:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****   __STDC_HOSTED__
+ 101:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** #  include <math.h>
+ 102:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** #endif
+ 103:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+ 104:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** /**
+ 105:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    \ingroup util_delay
+ 106:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+ 107:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    Perform a delay of \c __ms milliseconds, using _delay_loop_2().
+ 108:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+ 109:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    The macro F_CPU is supposed to be defined to a
+ 110:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    constant defining the CPU clock frequency (in Hertz).
+ 111:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+ 112:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    The maximal possible delay is 262.14 ms / F_CPU in MHz.
+ 113:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+ 114:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    When the user request delay which exceed the maximum possible one,
+ 115:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    _delay_ms() provides a decreased resolution functionality. In this
+ 116:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    mode _delay_ms() will work with a resolution of 1/10 ms, providing
+ 117:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    delays up to 6.5535 seconds (independent from CPU frequency).  The
+ 118:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    user will not be informed about decreased resolution.
+ 119:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+ 120:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    If the avr-gcc toolchain has __builtin_avr_delay_cycles(unsigned long)
+ 121:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    support, maximal possible delay is 4294967.295 ms/ F_CPU in MHz. For
+ 122:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    values greater than the maximal possible delay, overflows results in
+ 123:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    no delay i.e., 0ms.
+ 124:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+ 125:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    Conversion of __us into clock cycles may not always result in integer.
+ 126:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    By default, the clock cycles rounded up to next integer. This ensures that
+ 127:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    the user gets atleast __us microseconds of delay.
+ 128:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+ 129:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    Alternatively, user can define __DELAY_ROUND_DOWN__ and __DELAY_ROUND_CLOSEST__
+ 130:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    to round down and round to closest integer.
+ 131:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+ 132:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    Note: The new implementation of _delay_ms(double __ms) with 
+ 133:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****     __builtin_avr_delay_cycles(unsigned long) support is not backward compatible. 
+ 134:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    User can define __DELAY_BACKWARD_COMPATIBLE__ to get a backward compatible delay.
+ 135:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    Also, the backward compatible
+ 136:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    algorithm will be chosen if the code is compiled in a <em>freestanding
+ 137:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    environment</em> (GCC option \c -ffreestanding), as the math functions
+ 138:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    required for rounding are not available to the compiler then.
+ 139:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+ 140:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****  */
+ 141:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** void
+ 142:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** _delay_ms(double __ms)
+ 143:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** {
+ 144:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 	double __tmp ; 
+ 145:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** #if __HAS_DELAY_CYCLES && defined(__OPTIMIZE__) && \
+ 146:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****   !defined(__DELAY_BACKWARD_COMPATIBLE__) &&	   \
+ 147:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****   __STDC_HOSTED__
+ 148:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 	uint32_t __ticks_dc;
+ 149:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 	extern void __builtin_avr_delay_cycles(unsigned long);
+ 150:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 	__tmp = ((F_CPU) / 1e3) * __ms;
+ 151:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+ 152:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 	#if defined(__DELAY_ROUND_DOWN__)
+ 153:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 		__ticks_dc = (uint32_t)fabs(__tmp);
+ 154:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+ 155:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 	#elif defined(__DELAY_ROUND_CLOSEST__)
+ 156:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 		__ticks_dc = (uint32_t)(fabs(__tmp)+0.5);
+ 157:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+ 158:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 	#else
+ 159:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 		//round up by default
+ 160:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 		__ticks_dc = (uint32_t)(ceil(fabs(__tmp)));
+ 161:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 	#endif
+ 162:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+ 163:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 	__builtin_avr_delay_cycles(__ticks_dc);
+ 164:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+ 165:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** #else
+ 166:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 	uint16_t __ticks;
+ 167:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 	__tmp = ((F_CPU) / 4e3) * __ms;
+ 168:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 	if (__tmp < 1.0)
+ 169:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 		__ticks = 1;
+ 170:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 	else if (__tmp > 65535)
+ 171:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 	{
+ 172:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 		//	__ticks = requested delay in 1/10 ms
+ 173:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 		__ticks = (uint16_t) (__ms * 10.0);
+ 174:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 		while(__ticks)
+ 175:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 		{
+ 176:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 			// wait 1/10 ms
+ 177:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 			_delay_loop_2(((F_CPU) / 4e3) / 10);
+ 178:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 			__ticks --;
+ 179:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 		}
+ 180:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 		return;
+ 181:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 	}
+ 182:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 	else
+ 183:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 		__ticks = (uint16_t)__tmp;
+ 184:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 	_delay_loop_2(__ticks);
+ 185:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** #endif
+ 186:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** }
+ 187:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+ 188:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** /**
+ 189:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    \ingroup util_delay
+ 190:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+ 191:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    Perform a delay of \c __us microseconds, using _delay_loop_1().
+ 192:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+ 193:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    The macro F_CPU is supposed to be defined to a
+ 194:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    constant defining the CPU clock frequency (in Hertz).
+ 195:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+ 196:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    The maximal possible delay is 768 us / F_CPU in MHz.
+ 197:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+ 198:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    If the user requests a delay greater than the maximal possible one,
+ 199:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    _delay_us() will automatically call _delay_ms() instead.  The user
+ 200:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    will not be informed about this case.
+ 201:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+ 202:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    If the avr-gcc toolchain has __builtin_avr_delay_cycles(unsigned long)
+ 203:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    support, maximal possible delay is 4294967.295 us/ F_CPU in MHz. For
+ 204:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    values greater than the maximal possible delay, overflow results in
+ 205:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    no delay i.e., 0us.
+ 206:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****   
+ 207:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    Conversion of __us into clock cycles may not always result in integer.
+ 208:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    By default, the clock cycles rounded up to next integer. This ensures that
+ 209:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    the user gets atleast __us microseconds of delay.
+ 210:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+ 211:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    Alternatively, user can define __DELAY_ROUND_DOWN__ and __DELAY_ROUND_CLOSEST__
+ 212:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    to round down and round to closest integer.
+ 213:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****  
+ 214:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    Note: The new implementation of _delay_us(double __us) with 
+ 215:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****     __builtin_avr_delay_cycles(unsigned long) support is not backward compatible.
+ 216:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    User can define __DELAY_BACKWARD_COMPATIBLE__ to get a backward compatible delay.
+ 217:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    Also, the backward compatible
+ 218:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    algorithm will be chosen if the code is compiled in a <em>freestanding
+ 219:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    environment</em> (GCC option \c -ffreestanding), as the math functions
+ 220:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    required for rounding are not available to the compiler then.
+ 221:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+ 222:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****  */
+ 223:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** void
+ 224:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** _delay_us(double __us)
+ 225:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** {
+ 226:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 	double __tmp ; 
+ 227:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** #if __HAS_DELAY_CYCLES && defined(__OPTIMIZE__) && \
+ 228:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****   !defined(__DELAY_BACKWARD_COMPATIBLE__) &&	   \
+ 229:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****   __STDC_HOSTED__
+ 230:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 	uint32_t __ticks_dc;
+ 231:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 	extern void __builtin_avr_delay_cycles(unsigned long);
+ 232:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 	__tmp = ((F_CPU) / 1e6) * __us;
+ 233:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+ 234:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 	#if defined(__DELAY_ROUND_DOWN__)
+ 235:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 		__ticks_dc = (uint32_t)fabs(__tmp);
+ 236:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+ 237:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 	#elif defined(__DELAY_ROUND_CLOSEST__)
+ 238:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 		__ticks_dc = (uint32_t)(fabs(__tmp)+0.5);
+ 239:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+ 240:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 	#else
+ 241:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 		//round up by default
+ 242:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 		__ticks_dc = (uint32_t)(ceil(fabs(__tmp)));
+ 243:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 	#endif
+ 244:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+ 245:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 	__builtin_avr_delay_cycles(__ticks_dc);
+ 201               	.LM10:
+ 202 0020 85E3      		ldi r24,lo8(53)
+ 203 0022 8A95      		1: dec r24
+ 204 0024 01F4      		brne 1b
+ 205 0026 0000      		nop
+ 206 0028 C0E0      		ldi r28,0
+ 207 002a D0E0      		ldi r29,0
+ 208               	.LBE73:
+ 209               	.LBE72:
+ 211               	.Ltext2:
+  59:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 	uint8_t idx = 0;
+ 213               	.LM11:
+ 214 002c F12C      		mov r15,__zero_reg__
+ 215               	.L9:
+  64:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 	_delay_us(10);
+  65:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 	for (chan = 0; chan < 9; chan++) {
+  66:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 		ad = spi_transfer((chan << 4) | 0x0C);  // 0x0C = 16-Bit, MSB-First, Unipolar  
+ 217               	.LM12:
+ 218 002e CE01      		movw r24,r28
+ 219 0030 F4E0      		ldi r31,4
+ 220               		1:
+ 221 0032 880F      		lsl r24
+ 222 0034 991F      		rol r25
+ 223 0036 FA95      		dec r31
+ 224 0038 01F4      		brne 1b
+ 225 003a 8C60      		ori r24,lo8(12)
+ 226 003c 0E94 0000 		call spi_transfer
+ 227 0040 082F      		mov r16,r24
+ 228 0042 10E0      		ldi r17,0
+  67:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 		// ad = spi_transfer(0xBC); // Test; should be 0x800, 1/2 of vRef
+  68:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 		ad_l = spi_transfer(0x00);
+ 230               	.LM13:
+ 231 0044 80E0      		ldi r24,0
+ 232 0046 0E94 0000 		call spi_transfer
+  69:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 		ad <<= 8;  
+ 234               	.LM14:
+ 235 004a 302F      		mov r19,r16
+ 236 004c 2227      		clr r18
+  70:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 		ad |= ad_l;  
+ 238               	.LM15:
+ 239 004e 282B      		or r18,r24
+  71:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 		ad >>= 4;
+ 241               	.LM16:
+ 242 0050 B4E0      		ldi r27,4
+ 243               		1:
+ 244 0052 3695      		lsr r19
+ 245 0054 2795      		ror r18
+ 246 0056 BA95      		dec r27
+ 247 0058 01F4      		brne 1b
+ 248               	.LBB74:
+ 249               	.LBB75:
+ 251               	.Ltext3:
+ 253               	.LM17:
+ 254 005a 85E3      		ldi r24,lo8(53)
+ 255 005c 8A95      		1: dec r24
+ 256 005e 01F4      		brne 1b
+ 257 0060 0000      		nop
+ 258               	.LBE75:
+ 259               	.LBE74:
+ 261               	.Ltext4:
+  72:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 		_delay_us(10);
+  73:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 		if (chan > 0) {
+ 263               	.LM18:
+ 264 0062 CC23      		tst r28
+ 265 0064 01F0      		breq .L7
+  74:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 			adcLast[idx] = adcBuffer[idx];
+ 267               	.LM19:
+ 268 0066 8F2D      		mov r24,r15
+ 269 0068 90E0      		ldi r25,0
+ 270 006a 880F      		lsl r24
+ 271 006c 991F      		rol r25
+ 272 006e DC01      		movw r26,r24
+ 273 0070 A050      		subi r26,lo8(-(adcLast))
+ 274 0072 B040      		sbci r27,hi8(-(adcLast))
+ 275 0074 FC01      		movw r30,r24
+ 276 0076 E050      		subi r30,lo8(-(adcBuffer))
+ 277 0078 F040      		sbci r31,hi8(-(adcBuffer))
+ 278 007a 8081      		ld r24,Z
+ 279 007c 9181      		ldd r25,Z+1
+ 280 007e 8D93      		st X+,r24
+ 281 0080 9C93      		st X,r25
+  75:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 			adcBuffer[idx] = ad;
+ 283               	.LM20:
+ 284 0082 3183      		std Z+1,r19
+ 285 0084 2083      		st Z,r18
+  76:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 			idx++;
+ 287               	.LM21:
+ 288 0086 F394      		inc r15
+ 289               	.L7:
+ 290 0088 2196      		adiw r28,1
+  65:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 	for (chan = 0; chan < 9; chan++) {
+ 292               	.LM22:
+ 293 008a C930      		cpi r28,9
+ 294 008c D105      		cpc r29,__zero_reg__
+ 295 008e 01F4      		brne .L9
+  77:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 		}
+  78:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 	}
+  79:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 	PORTB |= (1 << CS1);
+ 297               	.LM23:
+ 298 0090 2C9A      		sbi 0x5,4
+  80:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 	PORTB &= ~(1 << CS2);
+ 300               	.LM24:
+ 301 0092 2B98      		cbi 0x5,3
+ 302               	.LBB76:
+ 303               	.LBB77:
+ 305               	.Ltext5:
+ 307               	.LM25:
+ 308 0094 85E3      		ldi r24,lo8(53)
+ 309 0096 8A95      		1: dec r24
+ 310 0098 01F4      		brne 1b
+ 311 009a 0000      		nop
+ 312 009c C0E0      		ldi r28,0
+ 313 009e D0E0      		ldi r29,0
+ 314               	.L12:
+ 315               	.LBE77:
+ 316               	.LBE76:
+ 318               	.Ltext6:
+  81:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 	_delay_us(10);
+  82:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 	for (chan = 0; chan < 9; chan++) {
+  83:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 		ad = spi_transfer((chan << 4) | 0x0C);  // 0x0C = 16-Bit, MSB-First, Unipolar  
+ 320               	.LM26:
+ 321 00a0 CE01      		movw r24,r28
+ 322 00a2 54E0      		ldi r21,4
+ 323               		1:
+ 324 00a4 880F      		lsl r24
+ 325 00a6 991F      		rol r25
+ 326 00a8 5A95      		dec r21
+ 327 00aa 01F4      		brne 1b
+ 328 00ac 8C60      		ori r24,lo8(12)
+ 329 00ae 0E94 0000 		call spi_transfer
+ 330 00b2 082F      		mov r16,r24
+ 331 00b4 10E0      		ldi r17,0
+  84:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 		// ad = spi_transfer(0xBC); // Test; should be 0x800, 1/2 of vRef
+  85:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 		ad_l = spi_transfer(0x00);
+ 333               	.LM27:
+ 334 00b6 80E0      		ldi r24,0
+ 335 00b8 0E94 0000 		call spi_transfer
+  86:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 		ad <<= 8;  
+ 337               	.LM28:
+ 338 00bc 302F      		mov r19,r16
+ 339 00be 2227      		clr r18
+  87:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 		ad |= ad_l;  
+ 341               	.LM29:
+ 342 00c0 282B      		or r18,r24
+  88:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 		ad >>= 4;
+ 344               	.LM30:
+ 345 00c2 74E0      		ldi r23,4
+ 346               		1:
+ 347 00c4 3695      		lsr r19
+ 348 00c6 2795      		ror r18
+ 349 00c8 7A95      		dec r23
+ 350 00ca 01F4      		brne 1b
+ 351               	.LBB78:
+ 352               	.LBB79:
+ 354               	.Ltext7:
+ 356               	.LM31:
+ 357 00cc 85E3      		ldi r24,lo8(53)
+ 358 00ce 8A95      		1: dec r24
+ 359 00d0 01F4      		brne 1b
+ 360 00d2 0000      		nop
+ 361               	.LBE79:
+ 362               	.LBE78:
+ 364               	.Ltext8:
+  89:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 		_delay_us(10);
+  90:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 		if (chan > 0) {
+ 366               	.LM32:
+ 367 00d4 CC23      		tst r28
+ 368 00d6 01F0      		breq .L10
+  91:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 			adcLast[idx] = adcBuffer[idx];
+ 370               	.LM33:
+ 371 00d8 8F2D      		mov r24,r15
+ 372 00da 90E0      		ldi r25,0
+ 373 00dc 880F      		lsl r24
+ 374 00de 991F      		rol r25
+ 375 00e0 DC01      		movw r26,r24
+ 376 00e2 A050      		subi r26,lo8(-(adcLast))
+ 377 00e4 B040      		sbci r27,hi8(-(adcLast))
+ 378 00e6 FC01      		movw r30,r24
+ 379 00e8 E050      		subi r30,lo8(-(adcBuffer))
+ 380 00ea F040      		sbci r31,hi8(-(adcBuffer))
+ 381 00ec 8081      		ld r24,Z
+ 382 00ee 9181      		ldd r25,Z+1
+ 383 00f0 8D93      		st X+,r24
+ 384 00f2 9C93      		st X,r25
+  92:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 			adcBuffer[idx] = ad;
+ 386               	.LM34:
+ 387 00f4 3183      		std Z+1,r19
+ 388 00f6 2083      		st Z,r18
+  93:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 			idx++;
+ 390               	.LM35:
+ 391 00f8 F394      		inc r15
+ 392               	.L10:
+ 393 00fa 2196      		adiw r28,1
+  82:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 	for (chan = 0; chan < 9; chan++) {
+ 395               	.LM36:
+ 396 00fc C930      		cpi r28,9
+ 397 00fe D105      		cpc r29,__zero_reg__
+ 398 0100 01F4      		brne .L12
+  94:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 		}
+  95:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 	}
+  96:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 	PORTB |= (1 << CS2);
+ 400               	.LM37:
+ 401 0102 2B9A      		sbi 0x5,3
+ 402               	/* epilogue start */
+  97:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** }
+ 404               	.LM38:
+ 405 0104 DF91      		pop r29
+ 406 0106 CF91      		pop r28
+ 407 0108 1F91      		pop r17
+ 408 010a 0F91      		pop r16
+ 409 010c FF90      		pop r15
+ 410 010e 0895      		ret
+ 415               	.Lscope3:
+ 416               		.section	.rodata.str1.1,"aMS",@progbits,1
+ 417               	.LC0:
+ 418 0000 5265 6164 		.string	"Reading mapping..\r\n"
+ 418      696E 6720 
+ 418      6D61 7070 
+ 418      696E 672E 
+ 418      2E0D 0A00 
+ 419               		.text
+ 422               	.global	readMapping
+ 424               	readMapping:
+  98:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 
+  99:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 
+ 100:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** struct jointMapping readMapping(uint8_t mapId) {
+ 426               	.LM39:
+ 427               	.LFBB4:
+ 428 0110 0F93      		push r16
+ 429 0112 1F93      		push r17
+ 430 0114 CF93      		push r28
+ 431 0116 DF93      		push r29
+ 432 0118 CDB7      		in r28,__SP_L__
+ 433 011a DEB7      		in r29,__SP_H__
+ 434 011c 6A97      		sbiw r28,26
+ 435 011e 0FB6      		in __tmp_reg__,__SREG__
+ 436 0120 F894      		cli
+ 437 0122 DEBF      		out __SP_H__,r29
+ 438 0124 0FBE      		out __SREG__,__tmp_reg__
+ 439 0126 CDBF      		out __SP_L__,r28
+ 440               	/* prologue: function */
+ 441               	/* frame size = 26 */
+ 442               	/* stack size = 30 */
+ 443               	.L__stack_usage = 30
+ 444 0128 8C01      		movw r16,r24
+ 101:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 	// Read a mapping from EEPROM and return a struct
+ 102:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 	struct jointMapping foo;
+ 103:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 	eeprom_read_block(&foo, (mapId * sizeof(foo)), sizeof(foo));
+ 446               	.LM40:
+ 447 012a 8AE1      		ldi r24,lo8(26)
+ 448 012c 689F      		mul r22,r24
+ 449 012e B001      		movw r22,r0
+ 450 0130 1124      		clr __zero_reg__
+ 451 0132 4AE1      		ldi r20,lo8(26)
+ 452 0134 50E0      		ldi r21,0
+ 453 0136 CE01      		movw r24,r28
+ 454 0138 0196      		adiw r24,1
+ 455 013a 0E94 0000 		call __eerd_block_m644
+ 104:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 	uart_puts("Reading mapping..\r\n");
+ 457               	.LM41:
+ 458 013e 80E0      		ldi r24,lo8(.LC0)
+ 459 0140 90E0      		ldi r25,hi8(.LC0)
+ 460 0142 0E94 0000 		call uart_puts
+ 105:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 	return foo;
+ 462               	.LM42:
+ 463 0146 8AE1      		ldi r24,lo8(26)
+ 464 0148 FE01      		movw r30,r28
+ 465 014a 3196      		adiw r30,1
+ 466 014c D801      		movw r26,r16
+ 467               		0:
+ 468 014e 0190      		ld r0,Z+
+ 469 0150 0D92      		st X+,r0
+ 470 0152 8A95      		dec r24
+ 471 0154 01F4      		brne 0b
+ 106:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** }
+ 473               	.LM43:
+ 474 0156 C801      		movw r24,r16
+ 475               	/* epilogue start */
+ 476 0158 6A96      		adiw r28,26
+ 477 015a 0FB6      		in __tmp_reg__,__SREG__
+ 478 015c F894      		cli
+ 479 015e DEBF      		out __SP_H__,r29
+ 480 0160 0FBE      		out __SREG__,__tmp_reg__
+ 481 0162 CDBF      		out __SP_L__,r28
+ 482 0164 DF91      		pop r29
+ 483 0166 CF91      		pop r28
+ 484 0168 1F91      		pop r17
+ 485 016a 0F91      		pop r16
+ 486 016c 0895      		ret
+ 491               	.Lscope4:
+ 495               	.global	writeMapping
+ 497               	writeMapping:
+ 107:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 
+ 108:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** void writeMapping(uint8_t mapId, struct jointMapping map) {
+ 499               	.LM44:
+ 500               	.LFBB5:
+ 501 016e CF93      		push r28
+ 502 0170 DF93      		push r29
+ 503 0172 CDB7      		in r28,__SP_L__
+ 504 0174 DEB7      		in r29,__SP_H__
+ 505               	/* prologue: function */
+ 506               	/* frame size = 0 */
+ 507               	/* stack size = 2 */
+ 508               	.L__stack_usage = 2
+ 109:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 	// Write mapping to EEPROM
+ 110:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 	strncpy(&map.magic, "##", 2);
+ 510               	.LM45:
+ 511 0176 23E2      		ldi r18,lo8(35)
+ 512 0178 33E2      		ldi r19,lo8(35)
+ 513 017a 3E83      		std Y+6,r19
+ 514 017c 2D83      		std Y+5,r18
+ 111:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 	eeprom_write_block(&map, (mapId * sizeof(map)), sizeof(map));
+ 516               	.LM46:
+ 517 017e 9AE1      		ldi r25,lo8(26)
+ 518 0180 899F      		mul r24,r25
+ 519 0182 B001      		movw r22,r0
+ 520 0184 1124      		clr __zero_reg__
+ 521 0186 4AE1      		ldi r20,lo8(26)
+ 522 0188 50E0      		ldi r21,0
+ 523 018a CE01      		movw r24,r28
+ 524 018c 0596      		adiw r24,5
+ 525 018e 0E94 0000 		call __eewr_block_m644
+ 526               	/* epilogue start */
+ 112:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** }
+ 528               	.LM47:
+ 529 0192 DF91      		pop r29
+ 530 0194 CF91      		pop r28
+ 531 0196 0895      		ret
+ 533               	.Lscope5:
+ 534               		.section	.rodata.str1.1
+ 535               	.LC1:
+ 536 0014 612E 4465 		.string	"a.Device: "
+ 536      7669 6365 
+ 536      3A20 00
+ 537               	.LC2:
+ 538 001f 0D0A 00   		.string	"\r\n"
+ 539               	.LC3:
+ 540 0022 622E 6675 		.string	"b.function: "
+ 540      6E63 7469 
+ 540      6F6E 3A20 
+ 540      00
+ 541               	.LC4:
+ 542 002f 632E 4C6F 		.string	"c.Low in: "
+ 542      7720 696E 
+ 542      3A20 00
+ 543               	.LC5:
+ 544 003a 642E 4869 		.string	"d.High in: "
+ 544      6768 2069 
+ 544      6E3A 2000 
+ 545               	.LC6:
+ 546 0046 652E 4C6F 		.string	"e.Low out: "
+ 546      7720 6F75 
+ 546      743A 2000 
+ 547               	.LC7:
+ 548 0052 662E 4869 		.string	"f.High out: "
+ 548      6768 206F 
+ 548      7574 3A20 
+ 548      00
+ 549               	.LC8:
+ 550 005f 672E 4343 		.string	"g.CC: "
+ 550      3A20 00
+ 551               	.LC9:
+ 552 0066 682E 4368 		.string	"h.Channel: "
+ 552      616E 6E65 
+ 552      6C3A 2000 
+ 553               	.LC10:
+ 554 0072 2D2D 2D2D 		.string	"-----------------------"
+ 554      2D2D 2D2D 
+ 554      2D2D 2D2D 
+ 554      2D2D 2D2D 
+ 554      2D2D 2D2D 
+ 555               		.text
+ 558               	.global	dumpMapping
+ 560               	dumpMapping:
+ 113:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 
+ 114:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 
+ 115:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** void dumpMapping(struct jointMapping map) {
+ 562               	.LM48:
+ 563               	.LFBB6:
+ 564 0198 CF93      		push r28
+ 565 019a DF93      		push r29
+ 566 019c CDB7      		in r28,__SP_L__
+ 567 019e DEB7      		in r29,__SP_H__
+ 568 01a0 6097      		sbiw r28,16
+ 569 01a2 0FB6      		in __tmp_reg__,__SREG__
+ 570 01a4 F894      		cli
+ 571 01a6 DEBF      		out __SP_H__,r29
+ 572 01a8 0FBE      		out __SREG__,__tmp_reg__
+ 573 01aa CDBF      		out __SP_L__,r28
+ 574               	/* prologue: function */
+ 575               	/* frame size = 16 */
+ 576               	/* stack size = 18 */
+ 577               	.L__stack_usage = 18
+ 116:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 	char buf[16];
+ 117:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 	if (map.magic[0] == '#' & map.magic[1] == '#') {
+ 579               	.LM49:
+ 580 01ac 8E89      		ldd r24,Y+22
+ 581 01ae 8332      		cpi r24,lo8(35)
+ 582 01b0 01F0      		breq .+2
+ 583 01b2 00C0      		rjmp .L21
+ 584 01b4 8D89      		ldd r24,Y+21
+ 585 01b6 8332      		cpi r24,lo8(35)
+ 586 01b8 01F0      		breq .+2
+ 587 01ba 00C0      		rjmp .L21
+ 118:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 			uart_puts("a.Device: ");
+ 589               	.LM50:
+ 590 01bc 80E0      		ldi r24,lo8(.LC1)
+ 591 01be 90E0      		ldi r25,hi8(.LC1)
+ 592 01c0 0E94 0000 		call uart_puts
+ 119:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 			uart_puts(map.device);
+ 594               	.LM51:
+ 595 01c4 CE01      		movw r24,r28
+ 596 01c6 4796      		adiw r24,23
+ 597 01c8 0E94 0000 		call uart_puts
+ 120:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 			uart_puts("\r\n");
+ 599               	.LM52:
+ 600 01cc 80E0      		ldi r24,lo8(.LC2)
+ 601 01ce 90E0      		ldi r25,hi8(.LC2)
+ 602 01d0 0E94 0000 		call uart_puts
+ 121:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 			uart_puts("b.function: ");
+ 604               	.LM53:
+ 605 01d4 80E0      		ldi r24,lo8(.LC3)
+ 606 01d6 90E0      		ldi r25,hi8(.LC3)
+ 607 01d8 0E94 0000 		call uart_puts
+ 122:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 			uart_puts(map.function);
+ 609               	.LM54:
+ 610 01dc CE01      		movw r24,r28
+ 611 01de 4F96      		adiw r24,31
+ 612 01e0 0E94 0000 		call uart_puts
+ 123:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 			uart_puts("\r\n");
+ 614               	.LM55:
+ 615 01e4 80E0      		ldi r24,lo8(.LC2)
+ 616 01e6 90E0      		ldi r25,hi8(.LC2)
+ 617 01e8 0E94 0000 		call uart_puts
+ 124:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 			uart_puts("c.Low in: ");
+ 619               	.LM56:
+ 620 01ec 80E0      		ldi r24,lo8(.LC4)
+ 621 01ee 90E0      		ldi r25,hi8(.LC4)
+ 622 01f0 0E94 0000 		call uart_puts
+ 623               	.LBB80:
+ 624               	.LBB81:
+ 626               	.Ltext9:
+   1:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** /* Copyright (c) 2002, Marek Michalkiewicz
+   2:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****    Copyright (c) 2004,2007 Joerg Wunsch
+   3:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** 
+   4:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****    Portions of documentation Copyright (c) 1990, 1991, 1993, 1994
+   5:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****    The Regents of the University of California.
+   6:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** 
+   7:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****    All rights reserved.
+   8:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** 
+   9:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****    Redistribution and use in source and binary forms, with or without
+  10:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****    modification, are permitted provided that the following conditions are met:
+  11:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** 
+  12:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****    * Redistributions of source code must retain the above copyright
+  13:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****      notice, this list of conditions and the following disclaimer.
+  14:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** 
+  15:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****    * Redistributions in binary form must reproduce the above copyright
+  16:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****      notice, this list of conditions and the following disclaimer in
+  17:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****      the documentation and/or other materials provided with the
+  18:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****      distribution.
+  19:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** 
+  20:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****    * Neither the name of the copyright holders nor the names of
+  21:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****      contributors may be used to endorse or promote products derived
+  22:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****      from this software without specific prior written permission.
+  23:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** 
+  24:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+  25:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****   AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+  26:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****   IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+  27:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****   ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
+  28:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****   LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+  29:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****   CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+  30:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****   SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+  31:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****   INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+  32:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****   CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+  33:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****   ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+  34:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****   POSSIBILITY OF SUCH DAMAGE.
+  35:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** 
+  36:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****   $Id$
+  37:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** */
+  38:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** 
+  39:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** #ifndef _STDLIB_H_
+  40:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** #define	_STDLIB_H_ 1
+  41:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** 
+  42:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** #ifndef __ASSEMBLER__
+  43:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** 
+  44:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** #define __need_NULL
+  45:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** #define __need_size_t
+  46:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** #define __need_wchar_t
+  47:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** #include <stddef.h>
+  48:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** 
+  49:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** #ifndef __ptr_t
+  50:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** #define __ptr_t void *
+  51:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** #endif
+  52:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** 
+  53:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** #ifdef __cplusplus
+  54:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** extern "C" {
+  55:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** #endif
+  56:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** 
+  57:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** /** \file */
+  58:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** 
+  59:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** /** \defgroup avr_stdlib <stdlib.h>: General utilities
+  60:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****     \code #include <stdlib.h> \endcode
+  61:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** 
+  62:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****     This file declares some basic C macros and functions as
+  63:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****     defined by the ISO standard, plus some AVR-specific extensions.
+  64:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** */
+  65:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** 
+  66:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** /*@{*/
+  67:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** /** Result type for function div(). */
+  68:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** typedef struct {
+  69:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** 	int quot;                   /**< The Quotient. */
+  70:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** 	int rem;                    /**< The Remainder. */
+  71:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** } div_t;
+  72:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** 
+  73:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** /** Result type for function ldiv(). */
+  74:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** typedef struct {
+  75:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** 	long quot;                  /**< The Quotient. */
+  76:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** 	long rem;                   /**< The Remainder. */
+  77:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** } ldiv_t;
+  78:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** 
+  79:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** /** Comparision function type for qsort(), just for convenience. */
+  80:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** typedef int (*__compar_fn_t)(const void *, const void *);
+  81:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** 
+  82:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** #ifndef __DOXYGEN__
+  83:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** 
+  84:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** #ifndef __ATTR_CONST__
+  85:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** # define __ATTR_CONST__ __attribute__((__const__))
+  86:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** #endif
+  87:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** 
+  88:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** #ifndef __ATTR_MALLOC__
+  89:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** # define __ATTR_MALLOC__ __attribute__((__malloc__))
+  90:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** #endif
+  91:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** 
+  92:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** #ifndef __ATTR_NORETURN__
+  93:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** # define __ATTR_NORETURN__ __attribute__((__noreturn__))
+  94:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** #endif
+  95:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** 
+  96:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** #ifndef __ATTR_PURE__
+  97:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** # define __ATTR_PURE__ __attribute__((__pure__))
+  98:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** #endif
+  99:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** 
+ 100:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** #ifndef	__ATTR_GNU_INLINE__
+ 101:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** # ifdef  __GNUC_STDC_INLINE__
+ 102:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** #  define __ATTR_GNU_INLINE__   __attribute__((__gnu_inline__))
+ 103:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** # else
+ 104:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** #  define __ATTR_GNU_INLINE__
+ 105:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** # endif
+ 106:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** #endif
+ 107:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** 
+ 108:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** #endif
+ 109:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** 
+ 110:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** /** The abort() function causes abnormal program termination to occur.
+ 111:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****     This realization disables interrupts and jumps to _exit() function
+ 112:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****     with argument equal to 1. In the limited AVR environment, execution is
+ 113:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****     effectively halted by entering an infinite loop. */
+ 114:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** extern void abort(void) __ATTR_NORETURN__;
+ 115:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** 
+ 116:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** /** The abs() function computes the absolute value of the integer \c i.
+ 117:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****    \note The abs() and labs() functions are builtins of gcc.
+ 118:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** */
+ 119:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** extern int abs(int __i) __ATTR_CONST__;
+ 120:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** #ifndef __DOXYGEN__
+ 121:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** #define	abs(__i) __builtin_abs(__i)
+ 122:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** #endif
+ 123:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** 
+ 124:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** /** The labs() function computes the absolute value of the long integer
+ 125:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****     \c i.
+ 126:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****    \note The abs() and labs() functions are builtins of gcc.
+ 127:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** */
+ 128:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** extern long labs(long __i) __ATTR_CONST__;
+ 129:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** #ifndef __DOXYGEN__
+ 130:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** #define labs(__i) __builtin_labs(__i)
+ 131:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** #endif
+ 132:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** 
+ 133:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** /**
+ 134:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****      The bsearch() function searches an array of \c nmemb objects, the
+ 135:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****      initial member of which is pointed to by \c base, for a member
+ 136:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****      that matches the object pointed to by \c key.  The size of each
+ 137:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****      member of the array is specified by \c size.
+ 138:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** 
+ 139:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****      The contents of the array should be in ascending sorted order
+ 140:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****      according to the comparison function referenced by \c compar.
+ 141:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****      The \c compar routine is expected to have two arguments which
+ 142:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****      point to the key object and to an array member, in that order,
+ 143:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****      and should return an integer less than, equal to, or greater than
+ 144:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****      zero if the key object is found, respectively, to be less than,
+ 145:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****      to match, or be greater than the array member.
+ 146:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** 
+ 147:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****      The bsearch() function returns a pointer to a matching member of
+ 148:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****      the array, or a null pointer if no match is found.  If two
+ 149:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****      members compare as equal, which member is matched is unspecified.
+ 150:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** */
+ 151:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** extern void *bsearch(const void *__key, const void *__base, size_t __nmemb,
+ 152:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** 		     size_t __size, int (*__compar)(const void *, const void *));
+ 153:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** 
+ 154:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** /* __divmodhi4 and __divmodsi4 from libgcc.a */
+ 155:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** /**
+ 156:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****      The div() function computes the value \c num/denom and returns
+ 157:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****      the quotient and remainder in a structure named \c div_t that
+ 158:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****      contains two int members named \c quot and \c rem.
+ 159:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** */
+ 160:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** extern div_t div(int __num, int __denom) __asm__("__divmodhi4") __ATTR_CONST__;
+ 161:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** /**
+ 162:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****      The ldiv() function computes the value \c num/denom and returns
+ 163:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****      the quotient and remainder in a structure named \c ldiv_t that
+ 164:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****      contains two long integer members named \c quot and \c rem.
+ 165:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** */
+ 166:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** extern ldiv_t ldiv(long __num, long __denom) __asm__("__divmodsi4") __ATTR_CONST__;
+ 167:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** 
+ 168:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** /**
+ 169:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****      The qsort() function is a modified partition-exchange sort, or
+ 170:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****      quicksort.
+ 171:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** 
+ 172:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****      The qsort() function sorts an array of \c nmemb objects, the
+ 173:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****      initial member of which is pointed to by \c base.  The size of
+ 174:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****      each object is specified by \c size.  The contents of the array
+ 175:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****      base are sorted in ascending order according to a comparison
+ 176:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****      function pointed to by \c compar, which requires two arguments
+ 177:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****      pointing to the objects being compared.
+ 178:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** 
+ 179:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****      The comparison function must return an integer less than, equal
+ 180:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****      to, or greater than zero if the first argument is considered to
+ 181:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****      be respectively less than, equal to, or greater than the second.
+ 182:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** */
+ 183:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** extern void qsort(void *__base, size_t __nmemb, size_t __size,
+ 184:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** 		  __compar_fn_t __compar);
+ 185:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** 
+ 186:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** /**
+ 187:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****     The strtol() function converts the string in \c nptr to a long
+ 188:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****     value.  The conversion is done according to the given base, which
+ 189:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****     must be between 2 and 36 inclusive, or be the special value 0.
+ 190:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** 
+ 191:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****     The string may begin with an arbitrary amount of white space (as
+ 192:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****     determined by isspace()) followed by a single optional \c '+' or \c '-'
+ 193:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****     sign.  If \c base is zero or 16, the string may then include a
+ 194:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****     \c "0x" prefix, and the number will be read in base 16; otherwise,
+ 195:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****     a zero base is taken as 10 (decimal) unless the next character is
+ 196:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****     \c '0', in which case it is taken as 8 (octal).
+ 197:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** 
+ 198:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****     The remainder of the string is converted to a long value in the
+ 199:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****     obvious manner, stopping at the first character which is not a
+ 200:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****     valid digit in the given base.  (In bases above 10, the letter \c 'A'
+ 201:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****     in either upper or lower case represents 10, \c 'B' represents 11,
+ 202:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****     and so forth, with \c 'Z' representing 35.)
+ 203:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** 
+ 204:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****     If \c endptr is not NULL, strtol() stores the address of the first
+ 205:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****     invalid character in \c *endptr.  If there were no digits at all,
+ 206:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****     however, strtol() stores the original value of \c nptr in \c
+ 207:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****     *endptr.  (Thus, if \c *nptr is not \c '\\0' but \c **endptr is \c '\\0'
+ 208:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****     on return, the entire string was valid.)
+ 209:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** 
+ 210:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****     The strtol() function returns the result of the conversion, unless
+ 211:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****     the value would underflow or overflow.  If no conversion could be
+ 212:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****     performed, 0 is returned.  If an overflow or underflow occurs, \c
+ 213:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****     errno is set to \ref avr_errno "ERANGE" and the function return value
+ 214:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****     is clamped to \c LONG_MIN or \c LONG_MAX, respectively.
+ 215:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** */
+ 216:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** extern long strtol(const char *__nptr, char **__endptr, int __base);
+ 217:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** 
+ 218:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** /**
+ 219:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****     The strtoul() function converts the string in \c nptr to an
+ 220:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****     unsigned long value.  The conversion is done according to the
+ 221:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****     given base, which must be between 2 and 36 inclusive, or be the
+ 222:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****     special value 0.
+ 223:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** 
+ 224:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****     The string may begin with an arbitrary amount of white space (as
+ 225:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****     determined by isspace()) followed by a single optional \c '+' or \c '-'
+ 226:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****     sign.  If \c base is zero or 16, the string may then include a
+ 227:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****     \c "0x" prefix, and the number will be read in base 16; otherwise,
+ 228:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****     a zero base is taken as 10 (decimal) unless the next character is
+ 229:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****     \c '0', in which case it is taken as 8 (octal).
+ 230:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** 
+ 231:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****     The remainder of the string is converted to an unsigned long value
+ 232:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****     in the obvious manner, stopping at the first character which is
+ 233:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****     not a valid digit in the given base.  (In bases above 10, the
+ 234:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****     letter \c 'A' in either upper or lower case represents 10, \c 'B'
+ 235:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****     represents 11, and so forth, with \c 'Z' representing 35.)
+ 236:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** 
+ 237:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****     If \c endptr is not NULL, strtoul() stores the address of the first
+ 238:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****     invalid character in \c *endptr.  If there were no digits at all,
+ 239:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****     however, strtoul() stores the original value of \c nptr in \c
+ 240:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****     *endptr.  (Thus, if \c *nptr is not \c '\\0' but \c **endptr is \c '\\0'
+ 241:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****     on return, the entire string was valid.)
+ 242:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** 
+ 243:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****     The strtoul() function return either the result of the conversion
+ 244:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****     or, if there was a leading minus sign, the negation of the result
+ 245:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****     of the conversion, unless the original (non-negated) value would
+ 246:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****     overflow; in the latter case, strtoul() returns ULONG_MAX, and \c
+ 247:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****     errno is set to \ref avr_errno "ERANGE".  If no conversion could 
+ 248:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****     be performed, 0 is returned.
+ 249:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** */
+ 250:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** extern unsigned long strtoul(const char *__nptr, char **__endptr, int __base);
+ 251:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** 
+ 252:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** /**
+ 253:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****     The atol() function converts the initial portion of the string
+ 254:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****     pointed to by \p s to long integer representation. In contrast to
+ 255:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** 
+ 256:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****         \code strtol(s, (char **)NULL, 10); \endcode
+ 257:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** 
+ 258:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****     this function does not detect overflow (\c errno is not changed and
+ 259:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****     the result value is not predictable), uses smaller memory (flash and
+ 260:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****     stack) and works more quickly.
+ 261:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** */
+ 262:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** extern long atol(const char *__s) __ATTR_PURE__;
+ 263:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** 
+ 264:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** /**
+ 265:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****     The atoi() function converts the initial portion of the string
+ 266:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****     pointed to by \p s to integer representation. In contrast to
+ 267:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** 
+ 268:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****         \code (int)strtol(s, (char **)NULL, 10); \endcode
+ 269:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** 
+ 270:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****     this function does not detect overflow (\c errno is not changed and
+ 271:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****     the result value is not predictable), uses smaller memory (flash and
+ 272:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****     stack) and works more quickly.
+ 273:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** */
+ 274:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** extern int atoi(const char *__s) __ATTR_PURE__;
+ 275:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** 
+ 276:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** /**
+ 277:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****    The exit() function terminates the application.  Since there is no
+ 278:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****    environment to return to, \c status is ignored, and code execution
+ 279:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****    will eventually reach an infinite loop, thereby effectively halting
+ 280:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****    all code processing.  Before entering the infinite loop, interrupts
+ 281:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****    are globally disabled.
+ 282:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** 
+ 283:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****    In a C++ context, global destructors will be called before halting
+ 284:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****    execution.
+ 285:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** */
+ 286:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** extern void exit(int __status) __ATTR_NORETURN__;
+ 287:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** 
+ 288:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** /**
+ 289:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****    The malloc() function allocates \c size bytes of memory.
+ 290:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****    If malloc() fails, a NULL pointer is returned.
+ 291:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** 
+ 292:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****    Note that malloc() does \e not initialize the returned memory to
+ 293:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****    zero bytes.
+ 294:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** 
+ 295:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****    See the chapter about \ref malloc "malloc() usage" for implementation
+ 296:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****    details.
+ 297:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** */
+ 298:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** extern void *malloc(size_t __size) __ATTR_MALLOC__;
+ 299:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** 
+ 300:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** /**
+ 301:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****    The free() function causes the allocated memory referenced by \c
+ 302:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****    ptr to be made available for future allocations.  If \c ptr is
+ 303:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****    NULL, no action occurs.
+ 304:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** */
+ 305:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** extern void free(void *__ptr);
+ 306:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** 
+ 307:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** /**
+ 308:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****    \c malloc() \ref malloc_tunables "tunable".
+ 309:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** */
+ 310:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** extern size_t __malloc_margin;
+ 311:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** 
+ 312:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** /**
+ 313:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****    \c malloc() \ref malloc_tunables "tunable".
+ 314:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** */
+ 315:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** extern char *__malloc_heap_start;
+ 316:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** 
+ 317:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** /**
+ 318:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****    \c malloc() \ref malloc_tunables "tunable".
+ 319:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** */
+ 320:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** extern char *__malloc_heap_end;
+ 321:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** 
+ 322:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** /**
+ 323:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****    Allocate \c nele elements of \c size each.  Identical to calling
+ 324:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****    \c malloc() using <tt>nele * size</tt> as argument, except the
+ 325:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****    allocated memory will be cleared to zero.
+ 326:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** */
+ 327:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** extern void *calloc(size_t __nele, size_t __size) __ATTR_MALLOC__;
+ 328:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** 
+ 329:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** /**
+ 330:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****    The realloc() function tries to change the size of the region
+ 331:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****    allocated at \c ptr to the new \c size value.  It returns a
+ 332:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****    pointer to the new region.  The returned pointer might be the
+ 333:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****    same as the old pointer, or a pointer to a completely different
+ 334:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****    region.
+ 335:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** 
+ 336:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****    The contents of the returned region up to either the old or the new
+ 337:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****    size value (whatever is less) will be identical to the contents of
+ 338:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****    the old region, even in case a new region had to be allocated.
+ 339:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** 
+ 340:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****    It is acceptable to pass \c ptr as NULL, in which case realloc()
+ 341:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****    will behave identical to malloc().
+ 342:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** 
+ 343:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****    If the new memory cannot be allocated, realloc() returns NULL, and
+ 344:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****    the region at \c ptr will not be changed.
+ 345:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** */
+ 346:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** extern void *realloc(void *__ptr, size_t __size) __ATTR_MALLOC__;
+ 347:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** 
+ 348:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** extern double strtod(const char *__nptr, char **__endptr);
+ 349:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** 
+ 350:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** extern double atof(const char *__nptr);
+ 351:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** 
+ 352:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** /** Highest number that can be generated by rand(). */
+ 353:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** #define	RAND_MAX 0x7FFF
+ 354:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** 
+ 355:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** /**
+ 356:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****      The rand() function computes a sequence of pseudo-random integers in the
+ 357:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****      range of 0 to \c RAND_MAX (as defined by the header file <stdlib.h>).
+ 358:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** 
+ 359:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****      The srand() function sets its argument \c seed as the seed for a new
+ 360:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****      sequence of pseudo-random numbers to be returned by rand().  These
+ 361:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****      sequences are repeatable by calling srand() with the same seed value.
+ 362:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** 
+ 363:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****      If no seed value is provided, the functions are automatically seeded with
+ 364:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****      a value of 1.
+ 365:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** 
+ 366:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****      In compliance with the C standard, these functions operate on
+ 367:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****      \c int arguments.  Since the underlying algorithm already uses
+ 368:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****      32-bit calculations, this causes a loss of precision.  See
+ 369:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****      \c random() for an alternate set of functions that retains full
+ 370:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****      32-bit precision.
+ 371:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** */
+ 372:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** extern int rand(void);
+ 373:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** /**
+ 374:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****    Pseudo-random number generator seeding; see rand().
+ 375:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** */
+ 376:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** extern void srand(unsigned int __seed);
+ 377:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** 
+ 378:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** /**
+ 379:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****    Variant of rand() that stores the context in the user-supplied
+ 380:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****    variable located at \c ctx instead of a static library variable
+ 381:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****    so the function becomes re-entrant.
+ 382:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** */
+ 383:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** extern int rand_r(unsigned long *__ctx);
+ 384:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** /*@}*/
+ 385:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** 
+ 386:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** /*@{*/
+ 387:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** /** \name Non-standard (i.e. non-ISO C) functions.
+ 388:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****  \ingroup avr_stdlib
+ 389:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** */
+ 390:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** /**
+ 391:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****    \brief Convert an integer to a string.
+ 392:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** 
+ 393:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****    The function itoa() converts the integer value from \c val into an
+ 394:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****    ASCII representation that will be stored under \c s.  The caller
+ 395:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****    is responsible for providing sufficient storage in \c s.
+ 396:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** 
+ 397:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****    \note The minimal size of the buffer \c s depends on the choice of
+ 398:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****    radix. For example, if the radix is 2 (binary), you need to supply a buffer
+ 399:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****    with a minimal length of 8 * sizeof (int) + 1 characters, i.e. one
+ 400:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****    character for each bit plus one for the string terminator. Using a larger
+ 401:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****    radix will require a smaller minimal buffer size.
+ 402:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** 
+ 403:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****    \warning If the buffer is too small, you risk a buffer overflow.
+ 404:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** 
+ 405:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****    Conversion is done using the \c radix as base, which may be a
+ 406:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****    number between 2 (binary conversion) and up to 36.  If \c radix
+ 407:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****    is greater than 10, the next digit after \c '9' will be the letter
+ 408:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****    \c 'a'.
+ 409:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****     
+ 410:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****     If radix is 10 and val is negative, a minus sign will be prepended.
+ 411:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** 
+ 412:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****    The itoa() function returns the pointer passed as \c s.
+ 413:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** */
+ 414:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** #ifdef  __DOXYGEN__
+ 415:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** extern char *itoa(int val, char *s, int radix);
+ 416:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** #else
+ 417:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** extern __inline__ __ATTR_GNU_INLINE__
+ 418:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** char *itoa (int __val, char *__s, int __radix)
+ 419:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** {
+ 420:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****     if (!__builtin_constant_p (__radix)) {
+ 421:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** 	extern char *__itoa (int, char *, int);
+ 422:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** 	return __itoa (__val, __s, __radix);
+ 423:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****     } else if (__radix < 2 || __radix > 36) {
+ 424:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** 	*__s = 0;
+ 425:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** 	return __s;
+ 426:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h ****     } else {
+ 427:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** 	extern char *__itoa_ncheck (int, char *, unsigned char);
+ 428:/usr/local/CrossPack-AVR-20131216/avr/include/stdlib.h **** 	return __itoa_ncheck (__val, __s, __radix);
+ 628               	.LM57:
+ 629 01f4 4AE0      		ldi r20,lo8(10)
+ 630 01f6 BE01      		movw r22,r28
+ 631 01f8 6F5F      		subi r22,-1
+ 632 01fa 7F4F      		sbci r23,-1
+ 633 01fc 8FA1      		ldd r24,Y+39
+ 634 01fe 98A5      		ldd r25,Y+40
+ 635 0200 0E94 0000 		call __itoa_ncheck
+ 636               	.LBE81:
+ 637               	.LBE80:
+ 639               	.Ltext10:
+ 125:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 			itoa(map.lowIn, &buf, 10);
+ 126:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 			uart_puts(buf);
+ 641               	.LM58:
+ 642 0204 CE01      		movw r24,r28
+ 643 0206 0196      		adiw r24,1
+ 644 0208 0E94 0000 		call uart_puts
+ 127:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 			uart_puts("\r\n");
+ 646               	.LM59:
+ 647 020c 80E0      		ldi r24,lo8(.LC2)
+ 648 020e 90E0      		ldi r25,hi8(.LC2)
+ 649 0210 0E94 0000 		call uart_puts
+ 128:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 			uart_puts("d.High in: ");
+ 651               	.LM60:
+ 652 0214 80E0      		ldi r24,lo8(.LC5)
+ 653 0216 90E0      		ldi r25,hi8(.LC5)
+ 654 0218 0E94 0000 		call uart_puts
+ 655               	.LBB82:
+ 656               	.LBB83:
+ 658               	.Ltext11:
+ 660               	.LM61:
+ 661 021c 4AE0      		ldi r20,lo8(10)
+ 662 021e BE01      		movw r22,r28
+ 663 0220 6F5F      		subi r22,-1
+ 664 0222 7F4F      		sbci r23,-1
+ 665 0224 89A5      		ldd r24,Y+41
+ 666 0226 9AA5      		ldd r25,Y+42
+ 667 0228 0E94 0000 		call __itoa_ncheck
+ 668               	.LBE83:
+ 669               	.LBE82:
+ 671               	.Ltext12:
+ 129:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 			itoa(map.highIn, &buf, 10);
+ 130:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 			uart_puts(buf);
+ 673               	.LM62:
+ 674 022c CE01      		movw r24,r28
+ 675 022e 0196      		adiw r24,1
+ 676 0230 0E94 0000 		call uart_puts
+ 131:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 			uart_puts("\r\n");
+ 678               	.LM63:
+ 679 0234 80E0      		ldi r24,lo8(.LC2)
+ 680 0236 90E0      		ldi r25,hi8(.LC2)
+ 681 0238 0E94 0000 		call uart_puts
+ 132:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 			uart_puts("e.Low out: ");
+ 683               	.LM64:
+ 684 023c 80E0      		ldi r24,lo8(.LC6)
+ 685 023e 90E0      		ldi r25,hi8(.LC6)
+ 686 0240 0E94 0000 		call uart_puts
+ 133:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 			itoa(map.lowOut, &buf, 10);
+ 688               	.LM65:
+ 689 0244 8BA5      		ldd r24,Y+43
+ 690               	.LBB84:
+ 691               	.LBB85:
+ 693               	.Ltext13:
+ 695               	.LM66:
+ 696 0246 4AE0      		ldi r20,lo8(10)
+ 697 0248 BE01      		movw r22,r28
+ 698 024a 6F5F      		subi r22,-1
+ 699 024c 7F4F      		sbci r23,-1
+ 700 024e 90E0      		ldi r25,0
+ 701 0250 0E94 0000 		call __itoa_ncheck
+ 702               	.LBE85:
+ 703               	.LBE84:
+ 705               	.Ltext14:
+ 134:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 			uart_puts(buf);
+ 707               	.LM67:
+ 708 0254 CE01      		movw r24,r28
+ 709 0256 0196      		adiw r24,1
+ 710 0258 0E94 0000 		call uart_puts
+ 135:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 			uart_puts("\r\n");
+ 712               	.LM68:
+ 713 025c 80E0      		ldi r24,lo8(.LC2)
+ 714 025e 90E0      		ldi r25,hi8(.LC2)
+ 715 0260 0E94 0000 		call uart_puts
+ 136:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 			uart_puts("f.High out: ");
+ 717               	.LM69:
+ 718 0264 80E0      		ldi r24,lo8(.LC7)
+ 719 0266 90E0      		ldi r25,hi8(.LC7)
+ 720 0268 0E94 0000 		call uart_puts
+ 137:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 			itoa(map.highOut, &buf, 10);
+ 722               	.LM70:
+ 723 026c 8CA5      		ldd r24,Y+44
+ 724               	.LBB86:
+ 725               	.LBB87:
+ 727               	.Ltext15:
+ 729               	.LM71:
+ 730 026e 4AE0      		ldi r20,lo8(10)
+ 731 0270 BE01      		movw r22,r28
+ 732 0272 6F5F      		subi r22,-1
+ 733 0274 7F4F      		sbci r23,-1
+ 734 0276 90E0      		ldi r25,0
+ 735 0278 0E94 0000 		call __itoa_ncheck
+ 736               	.LBE87:
+ 737               	.LBE86:
+ 739               	.Ltext16:
+ 138:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 			uart_puts(buf);
+ 741               	.LM72:
+ 742 027c CE01      		movw r24,r28
+ 743 027e 0196      		adiw r24,1
+ 744 0280 0E94 0000 		call uart_puts
+ 139:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 			uart_puts("\r\n");
+ 746               	.LM73:
+ 747 0284 80E0      		ldi r24,lo8(.LC2)
+ 748 0286 90E0      		ldi r25,hi8(.LC2)
+ 749 0288 0E94 0000 		call uart_puts
+ 140:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 			uart_puts("g.CC: ");
+ 751               	.LM74:
+ 752 028c 80E0      		ldi r24,lo8(.LC8)
+ 753 028e 90E0      		ldi r25,hi8(.LC8)
+ 754 0290 0E94 0000 		call uart_puts
+ 141:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 			itoa(map.cc, &buf, 10);
+ 756               	.LM75:
+ 757 0294 8DA5      		ldd r24,Y+45
+ 758               	.LBB88:
+ 759               	.LBB89:
+ 761               	.Ltext17:
+ 763               	.LM76:
+ 764 0296 4AE0      		ldi r20,lo8(10)
+ 765 0298 BE01      		movw r22,r28
+ 766 029a 6F5F      		subi r22,-1
+ 767 029c 7F4F      		sbci r23,-1
+ 768 029e 90E0      		ldi r25,0
+ 769 02a0 0E94 0000 		call __itoa_ncheck
+ 770               	.LBE89:
+ 771               	.LBE88:
+ 773               	.Ltext18:
+ 142:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 			uart_puts(buf);
+ 775               	.LM77:
+ 776 02a4 CE01      		movw r24,r28
+ 777 02a6 0196      		adiw r24,1
+ 778 02a8 0E94 0000 		call uart_puts
+ 143:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 			uart_puts("\r\n");
+ 780               	.LM78:
+ 781 02ac 80E0      		ldi r24,lo8(.LC2)
+ 782 02ae 90E0      		ldi r25,hi8(.LC2)
+ 783 02b0 0E94 0000 		call uart_puts
+ 144:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 			uart_puts("h.Channel: ");
+ 785               	.LM79:
+ 786 02b4 80E0      		ldi r24,lo8(.LC9)
+ 787 02b6 90E0      		ldi r25,hi8(.LC9)
+ 788 02b8 0E94 0000 		call uart_puts
+ 145:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 			itoa(map.channel, &buf, 10);
+ 790               	.LM80:
+ 791 02bc 8EA5      		ldd r24,Y+46
+ 792               	.LBB90:
+ 793               	.LBB91:
+ 795               	.Ltext19:
+ 797               	.LM81:
+ 798 02be 4AE0      		ldi r20,lo8(10)
+ 799 02c0 BE01      		movw r22,r28
+ 800 02c2 6F5F      		subi r22,-1
+ 801 02c4 7F4F      		sbci r23,-1
+ 802 02c6 90E0      		ldi r25,0
+ 803 02c8 0E94 0000 		call __itoa_ncheck
+ 804               	.LBE91:
+ 805               	.LBE90:
+ 807               	.Ltext20:
+ 146:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 			uart_puts(buf);
+ 809               	.LM82:
+ 810 02cc CE01      		movw r24,r28
+ 811 02ce 0196      		adiw r24,1
+ 812 02d0 0E94 0000 		call uart_puts
+ 147:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 			uart_puts("\r\n");
+ 814               	.LM83:
+ 815 02d4 80E0      		ldi r24,lo8(.LC2)
+ 816 02d6 90E0      		ldi r25,hi8(.LC2)
+ 817 02d8 0E94 0000 		call uart_puts
+ 148:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 			uart_puts("-----------------------");
+ 819               	.LM84:
+ 820 02dc 80E0      		ldi r24,lo8(.LC10)
+ 821 02de 90E0      		ldi r25,hi8(.LC10)
+ 822 02e0 0E94 0000 		call uart_puts
+ 149:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 			uart_puts("\r\n");
+ 824               	.LM85:
+ 825 02e4 80E0      		ldi r24,lo8(.LC2)
+ 826 02e6 90E0      		ldi r25,hi8(.LC2)
+ 827 02e8 0E94 0000 		call uart_puts
+ 828               	.L21:
+ 829               	/* epilogue start */
+ 150:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 		}
+ 151:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** }
+ 831               	.LM86:
+ 832 02ec 6096      		adiw r28,16
+ 833 02ee 0FB6      		in __tmp_reg__,__SREG__
+ 834 02f0 F894      		cli
+ 835 02f2 DEBF      		out __SP_H__,r29
+ 836 02f4 0FBE      		out __SREG__,__tmp_reg__
+ 837 02f6 CDBF      		out __SP_L__,r28
+ 838 02f8 DF91      		pop r29
+ 839 02fa CF91      		pop r28
+ 840 02fc 0895      		ret
+ 845               	.Lscope6:
+ 846               		.section	.rodata.str1.1
+ 847               	.LC11:
+ 848 008a 4564 6974 		.string	"Editing Joint # "
+ 848      696E 6720 
+ 848      4A6F 696E 
+ 848      7420 2320 
+ 848      00
+ 849               	.LC12:
+ 850 009b 3E20 2000 		.string	">  "
+ 851               		.text
+ 854               	.global	monitorMode
+ 856               	monitorMode:
+ 152:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 
+ 153:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 
+ 154:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** void monitorMode(uint8_t idx) {
+ 858               	.LM87:
+ 859               	.LFBB7:
+ 860 02fe CF93      		push r28
+ 861 0300 DF93      		push r29
+ 862 0302 CDB7      		in r28,__SP_L__
+ 863 0304 DEB7      		in r29,__SP_H__
+ 864 0306 2897      		sbiw r28,8
+ 865 0308 0FB6      		in __tmp_reg__,__SREG__
+ 866 030a F894      		cli
+ 867 030c DEBF      		out __SP_H__,r29
+ 868 030e 0FBE      		out __SREG__,__tmp_reg__
+ 869 0310 CDBF      		out __SP_L__,r28
+ 870               	/* prologue: function */
+ 871               	/* frame size = 8 */
+ 872               	/* stack size = 10 */
+ 873               	.L__stack_usage = 10
+ 874 0312 182F      		mov r17,r24
+ 155:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 	// Terminal monitor mode
+ 156:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 	char buf[8];
+ 157:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 	uart_puts("Editing Joint # ");
+ 876               	.LM88:
+ 877 0314 80E0      		ldi r24,lo8(.LC11)
+ 878 0316 90E0      		ldi r25,hi8(.LC11)
+ 879 0318 0E94 0000 		call uart_puts
+ 880               	.LBB92:
+ 881               	.LBB93:
+ 883               	.Ltext21:
+ 885               	.LM89:
+ 886 031c 4AE0      		ldi r20,lo8(10)
+ 887 031e BE01      		movw r22,r28
+ 888 0320 6F5F      		subi r22,-1
+ 889 0322 7F4F      		sbci r23,-1
+ 890 0324 812F      		mov r24,r17
+ 891 0326 90E0      		ldi r25,0
+ 892 0328 0E94 0000 		call __itoa_ncheck
+ 893               	.LBE93:
+ 894               	.LBE92:
+ 896               	.Ltext22:
+ 158:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 	itoa(idx, &buf, 10);
+ 159:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 	uart_puts(buf);
+ 898               	.LM90:
+ 899 032c CE01      		movw r24,r28
+ 900 032e 0196      		adiw r24,1
+ 901 0330 0E94 0000 		call uart_puts
+ 160:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 	uart_puts("\r\n");
+ 903               	.LM91:
+ 904 0334 80E0      		ldi r24,lo8(.LC2)
+ 905 0336 90E0      		ldi r25,hi8(.LC2)
+ 906 0338 0E94 0000 		call uart_puts
+ 907               	.L34:
+ 161:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 	
+ 162:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 	while(true) {
+ 163:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 		uart_puts(">  ");
+ 909               	.LM92:
+ 910 033c 80E0      		ldi r24,lo8(.LC12)
+ 911 033e 90E0      		ldi r25,hi8(.LC12)
+ 912 0340 0E94 0000 		call uart_puts
+ 913               	.L32:
+ 164:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 		while(uart_getc() != 'x') {wdt_reset();};
+ 915               	.LM93:
+ 916 0344 0E94 0000 		call uart_getc
+ 917 0348 8837      		cpi r24,120
+ 918 034a 9105      		cpc r25,__zero_reg__
+ 919 034c 01F0      		breq .L34
+ 921               	.LM94:
+ 922               	/* #APP */
+ 923               	 ;  164 "/Users/anton/Desktop/AVR/MidiSuit/Main.c" 1
+ 924 034e A895      		wdr
+ 925               	 ;  0 "" 2
+ 926               	/* #NOAPP */
+ 927 0350 00C0      		rjmp .L32
+ 932               	.Lscope7:
+ 939               	.global	map
+ 941               	map:
+ 165:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 		
+ 166:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 	}
+ 167:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** }
+ 168:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 
+ 169:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** long map(long x, long in_min, long in_max, long out_min, long out_max)
+ 170:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** {
+ 943               	.LM95:
+ 944               	.LFBB8:
+ 945 0352 4F92      		push r4
+ 946 0354 5F92      		push r5
+ 947 0356 6F92      		push r6
+ 948 0358 7F92      		push r7
+ 949 035a AF92      		push r10
+ 950 035c BF92      		push r11
+ 951 035e CF92      		push r12
+ 952 0360 DF92      		push r13
+ 953 0362 EF92      		push r14
+ 954 0364 FF92      		push r15
+ 955 0366 0F93      		push r16
+ 956 0368 1F93      		push r17
+ 957 036a CF93      		push r28
+ 958 036c DF93      		push r29
+ 959 036e CDB7      		in r28,__SP_L__
+ 960 0370 DEB7      		in r29,__SP_H__
+ 961               	/* prologue: function */
+ 962               	/* frame size = 0 */
+ 963               	/* stack size = 14 */
+ 964               	.L__stack_usage = 14
+ 965 0372 2901      		movw r4,r18
+ 966 0374 3A01      		movw r6,r20
+ 171:/Users/anton/Desktop/AVR/MidiSuit/Main.c ****   return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
+ 968               	.LM96:
+ 969 0376 621B      		sub r22,r18
+ 970 0378 730B      		sbc r23,r19
+ 971 037a 840B      		sbc r24,r20
+ 972 037c 950B      		sbc r25,r21
+ 973 037e 2989      		ldd r18,Y+17
+ 974 0380 3A89      		ldd r19,Y+18
+ 975 0382 4B89      		ldd r20,Y+19
+ 976 0384 5C89      		ldd r21,Y+20
+ 977 0386 2A19      		sub r18,r10
+ 978 0388 3B09      		sbc r19,r11
+ 979 038a 4C09      		sbc r20,r12
+ 980 038c 5D09      		sbc r21,r13
+ 981 038e 298B      		std Y+17,r18
+ 982 0390 3A8B      		std Y+18,r19
+ 983 0392 4B8B      		std Y+19,r20
+ 984 0394 5C8B      		std Y+20,r21
+ 985 0396 9B01      		movw r18,r22
+ 986 0398 AC01      		movw r20,r24
+ 987 039a 6989      		ldd r22,Y+17
+ 988 039c 7A89      		ldd r23,Y+18
+ 989 039e 8B89      		ldd r24,Y+19
+ 990 03a0 9C89      		ldd r25,Y+20
+ 991 03a2 0E94 0000 		call __mulsi3
+ 992 03a6 E418      		sub r14,r4
+ 993 03a8 F508      		sbc r15,r5
+ 994 03aa 0609      		sbc r16,r6
+ 995 03ac 1709      		sbc r17,r7
+ 996 03ae A801      		movw r20,r16
+ 997 03b0 9701      		movw r18,r14
+ 998 03b2 0E94 0000 		call __divmodsi4
+ 999 03b6 2A0D      		add r18,r10
+ 1000 03b8 3B1D      		adc r19,r11
+ 1001 03ba 4C1D      		adc r20,r12
+ 1002 03bc 5D1D      		adc r21,r13
+ 172:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** }
+ 1004               	.LM97:
+ 1005 03be CA01      		movw r24,r20
+ 1006 03c0 B901      		movw r22,r18
+ 1007               	/* epilogue start */
+ 1008 03c2 DF91      		pop r29
+ 1009 03c4 CF91      		pop r28
+ 1010 03c6 1F91      		pop r17
+ 1011 03c8 0F91      		pop r16
+ 1012 03ca FF90      		pop r15
+ 1013 03cc EF90      		pop r14
+ 1014 03ce DF90      		pop r13
+ 1015 03d0 CF90      		pop r12
+ 1016 03d2 BF90      		pop r11
+ 1017 03d4 AF90      		pop r10
+ 1018 03d6 7F90      		pop r7
+ 1019 03d8 6F90      		pop r6
+ 1020 03da 5F90      		pop r5
+ 1021 03dc 4F90      		pop r4
+ 1022 03de 0895      		ret
+ 1024               	.Lscope8:
+ 1025               		.section	.rodata.str1.1
+ 1026               	.LC13:
+ 1027 009f 5374 6172 		.string	"Starting; \r\n"
+ 1027      7469 6E67 
+ 1027      3B20 0D0A 
+ 1027      00
+ 1028               		.section	.rodata
+ 1029               	.LC14:
+ 1030 0000 5365 636F 		.string	"Second"
+ 1030      6E64 00
+ 1031 0007 00        		.string	""
+ 1032               		.section	.rodata.str1.1
+ 1033               	.LC15:
+ 1034 00ac 4D61 7070 		.string	"Mapping #"
+ 1034      696E 6720 
+ 1034      2300 
+ 1035               	.LC16:
+ 1036 00b6 203D 2000 		.string	" = "
+ 1037               	.LC17:
+ 1038 00ba 452E 4D61 		.string	"E.Mapping #"
+ 1038      7070 696E 
+ 1038      6720 2300 
+ 1039               	.LC18:
+ 1040 00c6 4564 6974 		.string	"Editing mapping #"
+ 1040      696E 6720 
+ 1040      6D61 7070 
+ 1040      696E 6720 
+ 1040      2300 
+ 1041               	.LC19:
+ 1042 00d8 5374 7265 		.string	"Streaming values: \r\n"
+ 1042      616D 696E 
+ 1042      6720 7661 
+ 1042      6C75 6573 
+ 1042      3A20 0D0A 
+ 1043               	.LC20:
+ 1044 00ed 5374 6F70 		.string	"Stop streaming values: \r\n"
+ 1044      2073 7472 
+ 1044      6561 6D69 
+ 1044      6E67 2076 
+ 1044      616C 7565 
+ 1045               	.LC21:
+ 1046 0107 4578 6974 		.string	"Exiting edit mode.\r\n"
+ 1046      696E 6720 
+ 1046      6564 6974 
+ 1046      206D 6F64 
+ 1046      652E 0D0A 
+ 1047               	.LC22:
+ 1048 011c 5772 6974 		.string	"Written to EEPROM\r\n"
+ 1048      7465 6E20 
+ 1048      746F 2045 
+ 1048      4550 524F 
+ 1048      4D0D 0A00 
+ 1049               	.LC23:
+ 1050 0130 5261 773A 		.string	"Raw: "
+ 1050      2000 
+ 1051               		.section	.text.startup,"ax",@progbits
+ 1053               	.global	main
+ 1055               	main:
+ 173:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 
+ 174:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** int main(void) {
+ 1057               	.LM98:
+ 1058               	.LFBB9:
+ 1059 0000 CF93      		push r28
+ 1060 0002 DF93      		push r29
+ 1061 0004 CDB7      		in r28,__SP_L__
+ 1062 0006 DEB7      		in r29,__SP_H__
+ 1063 0008 C455      		subi r28,84
+ 1064 000a D109      		sbc r29,__zero_reg__
+ 1065 000c 0FB6      		in __tmp_reg__,__SREG__
+ 1066 000e F894      		cli
+ 1067 0010 DEBF      		out __SP_H__,r29
+ 1068 0012 0FBE      		out __SREG__,__tmp_reg__
+ 1069 0014 CDBF      		out __SP_L__,r28
+ 1070               	/* prologue: function */
+ 1071               	/* frame size = 84 */
+ 1072               	/* stack size = 86 */
+ 1073               	.L__stack_usage = 86
+ 175:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 	char buf[16]; // General serial IO buffer
+ 176:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 	char cmdIn[16]; // Terminal command buffer
+ 177:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 	uint8_t cmdCount; // Counter for command buffer
+ 178:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 	struct jointMapping currentJoint;
+ 179:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 	uint8_t currentIdx;
+ 180:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 	uint16_t rx;
+ 181:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 	bool cmdWaiting = false;
+ 182:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 	bool stream = false;
+ 183:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 	bool editing = false;
+ 184:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 	uint8_t tmp;
+ 185:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 	uint16_t val;
+ 186:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 	uint8_t chanOut;
+ 187:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 	
+ 188:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 	//Set up watchdog timer
+ 189:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 	wdt_enable (WDTO_1S);
+ 1075               	.LM99:
+ 1076 0016 2EE0      		ldi r18,lo8(14)
+ 1077 0018 88E1      		ldi r24,lo8(24)
+ 1078 001a 90E0      		ldi r25,0
+ 1079               	/* #APP */
+ 1080               	 ;  189 "/Users/anton/Desktop/AVR/MidiSuit/Main.c" 1
+ 1081 001c 0FB6      		in __tmp_reg__,__SREG__
+ 1082 001e F894      		cli
+ 1083 0020 A895      		wdr
+ 1084 0022 8093 6000 		sts 96,r24
+ 1085 0026 0FBE      		out __SREG__,__tmp_reg__
+ 1086 0028 2093 6000 		sts 96,r18
+ 1087               		
+ 1088               	 ;  0 "" 2
+ 190:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 	#ifdef DEBUG
+ 191:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 		uart_init(UART_BAUD_SELECT(UART_BAUD_RATE, F_CPU) );
+ 1090               	.LM100:
+ 1091               	/* #NOAPP */
+ 1092 002c 80E1      		ldi r24,lo8(16)
+ 1093 002e 90E0      		ldi r25,0
+ 1094 0030 0E94 0000 		call uart_init
+ 192:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 		uart_puts("Starting; \r\n");
+ 1096               	.LM101:
+ 1097 0034 80E0      		ldi r24,lo8(.LC13)
+ 1098 0036 90E0      		ldi r25,hi8(.LC13)
+ 1099 0038 0E94 0000 		call uart_puts
+ 193:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 	#endif
+ 194:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 	
+ 195:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 	sei(); // Enable interrupts
+ 1101               	.LM102:
+ 1102               	/* #APP */
+ 1103               	 ;  195 "/Users/anton/Desktop/AVR/MidiSuit/Main.c" 1
+ 1104 003c 7894      		sei
+ 1105               	 ;  0 "" 2
+ 196:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 	
+ 197:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 	
+ 198:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 	strncpy(&currentJoint.device, "Second\0", 7);
+ 1107               	.LM103:
+ 1108               	/* #NOAPP */
+ 1109 003e 87E0      		ldi r24,lo8(7)
+ 1110 0040 E0E0      		ldi r30,lo8(.LC14)
+ 1111 0042 F0E0      		ldi r31,hi8(.LC14)
+ 1112 0044 DE01      		movw r26,r28
+ 1113 0046 5D96      		adiw r26,29
+ 1114               		0:
+ 1115 0048 0190      		ld r0,Z+
+ 1116 004a 0D92      		st X+,r0
+ 1117 004c 8A95      		dec r24
+ 1118 004e 01F4      		brne 0b
+ 199:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 	strncpy(&currentJoint.function, "boo\0", 4);
+ 1120               	.LM104:
+ 1121 0050 82E6      		ldi r24,lo8(98)
+ 1122 0052 9FE6      		ldi r25,lo8(111)
+ 1123 0054 AFE6      		ldi r26,lo8(111)
+ 1124 0056 B0E0      		ldi r27,0
+ 1125 0058 8DA3      		std Y+37,r24
+ 1126 005a 9EA3      		std Y+38,r25
+ 1127 005c AFA3      		std Y+39,r26
+ 1128 005e B8A7      		std Y+40,r27
+ 200:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 	currentJoint.lowIn = 1000;
+ 1130               	.LM105:
+ 1131 0060 88EE      		ldi r24,lo8(-24)
+ 1132 0062 93E0      		ldi r25,lo8(3)
+ 1133 0064 9EA7      		std Y+46,r25
+ 1134 0066 8DA7      		std Y+45,r24
+ 201:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 	currentJoint.highIn = 233;
+ 1136               	.LM106:
+ 1137 0068 89EE      		ldi r24,lo8(-23)
+ 1138 006a 90E0      		ldi r25,0
+ 1139 006c 98AB      		std Y+48,r25
+ 1140 006e 8FA7      		std Y+47,r24
+ 202:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 	currentJoint.lowOut = 1;
+ 1142               	.LM107:
+ 1143 0070 81E0      		ldi r24,lo8(1)
+ 1144 0072 89AB      		std Y+49,r24
+ 203:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 	currentJoint.highOut = 127;
+ 1146               	.LM108:
+ 1147 0074 9FE7      		ldi r25,lo8(127)
+ 1148 0076 9AAB      		std Y+50,r25
+ 204:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 	currentJoint.cc = 0x0C;
+ 1150               	.LM109:
+ 1151 0078 9CE0      		ldi r25,lo8(12)
+ 1152 007a 9BAB      		std Y+51,r25
+ 205:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 	currentJoint.channel = 1;
+ 1154               	.LM110:
+ 1155 007c 8CAB      		std Y+52,r24
+ 206:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 	
+ 207:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 	
+ 208:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 	//writeMapping(1, currentJoint);
+ 209:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 	
+ 210:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 	//dumpMappings();
+ 211:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 
+ 212:/Users/anton/Desktop/AVR/MidiSuit/Main.c ****   
+ 213:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 	// SPI setup
+ 214:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 	DDRB &= ~(1 << MISO);	// Input
+ 1157               	.LM111:
+ 1158 007e 2698      		cbi 0x4,6
+ 215:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 	DDRB |= (1 << SCK);	// Output
+ 1160               	.LM112:
+ 1161 0080 279A      		sbi 0x4,7
+ 216:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 	DDRB |= (1 << MOSI);	// Output
+ 1163               	.LM113:
+ 1164 0082 259A      		sbi 0x4,5
+ 217:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 	DDRB |= (1 << CS1);	// Output
+ 1166               	.LM114:
+ 1167 0084 249A      		sbi 0x4,4
+ 218:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 	DDRB |= (1 << CS2);	// Output
+ 1169               	.LM115:
+ 1170 0086 239A      		sbi 0x4,3
+ 1171               	.LBB94:
+ 1172               	.LBB95:
+  45:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 	SPCR = (1 << SPE) | (1 << MSTR) | (1 << SPR1) | (1 << SPR0);
+ 1174               	.LM116:
+ 1175 0088 83E5      		ldi r24,lo8(83)
+ 1176 008a 8CBD      		out 0x2c,r24
+  46:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 	SPSR = 0x00;
+ 1178               	.LM117:
+ 1179 008c 1DBC      		out 0x2d,__zero_reg__
+ 1180               	.LBE95:
+ 1181               	.LBE94:
+ 219:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 	// enable SPI Master, MSB, SPI mode 0, FOSC/4
+ 220:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 	spi_mode(0);
+ 221:/Users/anton/Desktop/AVR/MidiSuit/Main.c ****   
+ 222:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 	PORTB |= (1 << CS1);
+ 1183               	.LM118:
+ 1184 008e 2C9A      		sbi 0x5,4
+ 223:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 	PORTB |= (1 << CS2);
+ 1186               	.LM119:
+ 1187 0090 2B9A      		sbi 0x5,3
+ 183:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 	bool editing = false;
+ 1189               	.LM120:
+ 1190 0092 212C      		mov r2,__zero_reg__
+ 182:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 	bool stream = false;
+ 1192               	.LM121:
+ 1193 0094 812C      		mov r8,__zero_reg__
+ 1194               	.LBB96:
+ 1195               	.LBB97:
+ 110:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 	strncpy(&map.magic, "##", 2);
+ 1197               	.LM122:
+ 1198 0096 33E2      		ldi r19,lo8(35)
+ 1199 0098 A32E      		mov r10,r19
+ 1200 009a BA2C      		mov r11,r10
+ 1201               	.L65:
+ 1202               	.LBE97:
+ 1203               	.LBE96:
+ 224:/Users/anton/Desktop/AVR/MidiSuit/Main.c ****   
+ 225:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 	
+ 226:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 	// Main loop
+ 227:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 	while(1) {
+ 228:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 		// Read ADC values
+ 229:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 		readADC();
+ 1205               	.LM123:
+ 1206 009c 0E94 0000 		call readADC
+ 230:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 		
+ 231:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 		// Map
+ 232:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 		if (!editing) {
+ 1208               	.LM124:
+ 1209 00a0 2110      		cpse r2,__zero_reg__
+ 1210 00a2 00C0      		rjmp .L37
+ 233:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 			for (tmp = 0; tmp < 1; tmp++) {
+ 234:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 				if (adcBuffer[tmp] < (adcLast[tmp] - deadband) | adcBuffer[tmp] > (adcLast[tmp] + deadband)) {
+ 1212               	.LM125:
+ 1213 00a4 8091 0000 		lds r24,adcBuffer
+ 1214 00a8 9091 0000 		lds r25,adcBuffer+1
+ 1215 00ac 2091 0000 		lds r18,adcLast
+ 1216 00b0 3091 0000 		lds r19,adcLast+1
+ 1217 00b4 A901      		movw r20,r18
+ 1218 00b6 4C5F      		subi r20,-4
+ 1219 00b8 5F4F      		sbci r21,-1
+ 1220 00ba 4817      		cp r20,r24
+ 1221 00bc 5907      		cpc r21,r25
+ 1222 00be 00F0      		brlo .L38
+ 1223 00c0 2450      		subi r18,4
+ 1224 00c2 3109      		sbc r19,__zero_reg__
+ 1225 00c4 8217      		cp r24,r18
+ 1226 00c6 9307      		cpc r25,r19
+ 1227 00c8 00F0      		brlo .+2
+ 1228 00ca 00C0      		rjmp .L43
+ 1229               	.L38:
+ 235:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 					// Value has changed sufficiently; look for mapping and send it
+ 236:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 					// See if there's a mapping for this channel
+ 237:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 					currentJoint = readMapping(tmp);
+ 1231               	.LM126:
+ 1232 00cc 60E0      		ldi r22,0
+ 1233 00ce CE01      		movw r24,r28
+ 1234 00d0 4B96      		adiw r24,27
+ 1235 00d2 0E94 0000 		call readMapping
+ 238:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 					if (currentJoint.magic[0] == '#' && currentJoint.magic[1] == '#') {
+ 1237               	.LM127:
+ 1238 00d6 8B8D      		ldd r24,Y+27
+ 1239 00d8 8332      		cpi r24,lo8(35)
+ 1240 00da 01F0      		breq .+2
+ 1241 00dc 00C0      		rjmp .L43
+ 1243               	.LM128:
+ 1244 00de 8C8D      		ldd r24,Y+28
+ 1245 00e0 8332      		cpi r24,lo8(35)
+ 1246 00e2 01F0      		breq .+2
+ 1247 00e4 00C0      		rjmp .L43
+ 239:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 						// Valid mapping
+ 240:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 						chanOut = map(adcBuffer[tmp], currentJoint.lowIn, currentJoint.highIn, currentJoint.lowOut, c
+ 1249               	.LM129:
+ 1250 00e6 49A8      		ldd r4,Y+49
+ 1251 00e8 512C      		mov r5,__zero_reg__
+ 1252 00ea 612C      		mov r6,__zero_reg__
+ 1253 00ec 712C      		mov r7,__zero_reg__
+ 1254 00ee CDA4      		ldd r12,Y+45
+ 1255 00f0 DEA4      		ldd r13,Y+46
+ 1256 00f2 E12C      		mov r14,__zero_reg__
+ 1257 00f4 F12C      		mov r15,__zero_reg__
+ 1258 00f6 2091 0000 		lds r18,adcBuffer
+ 1259 00fa 3091 0000 		lds r19,adcBuffer+1
+ 1260 00fe 40E0      		ldi r20,0
+ 1261 0100 50E0      		ldi r21,0
+ 1262               	.LBB99:
+ 1263               	.LBB100:
+ 171:/Users/anton/Desktop/AVR/MidiSuit/Main.c ****   return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
+ 1265               	.LM130:
+ 1266 0102 2C19      		sub r18,r12
+ 1267 0104 3D09      		sbc r19,r13
+ 1268 0106 4E09      		sbc r20,r14
+ 1269 0108 5F09      		sbc r21,r15
+ 1270               	.LBE100:
+ 1271               	.LBE99:
+ 1273               	.LM131:
+ 1274 010a 6AA9      		ldd r22,Y+50
+ 1275 010c 70E0      		ldi r23,0
+ 1276 010e 80E0      		ldi r24,0
+ 1277 0110 90E0      		ldi r25,0
+ 1278               	.LBB103:
+ 1279               	.LBB101:
+ 171:/Users/anton/Desktop/AVR/MidiSuit/Main.c ****   return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
+ 1281               	.LM132:
+ 1282 0112 6419      		sub r22,r4
+ 1283 0114 7509      		sbc r23,r5
+ 1284 0116 8609      		sbc r24,r6
+ 1285 0118 9709      		sbc r25,r7
+ 1286 011a 0E94 0000 		call __mulsi3
+ 1287               	.LBE101:
+ 1288               	.LBE103:
+ 1290               	.LM133:
+ 1291 011e 2FA5      		ldd r18,Y+47
+ 1292 0120 38A9      		ldd r19,Y+48
+ 1293 0122 40E0      		ldi r20,0
+ 1294 0124 50E0      		ldi r21,0
+ 1295               	.LBB104:
+ 1296               	.LBB102:
+ 171:/Users/anton/Desktop/AVR/MidiSuit/Main.c ****   return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
+ 1298               	.LM134:
+ 1299 0126 2C19      		sub r18,r12
+ 1300 0128 3D09      		sbc r19,r13
+ 1301 012a 4E09      		sbc r20,r14
+ 1302 012c 5F09      		sbc r21,r15
+ 1303 012e 0E94 0000 		call __divmodsi4
+ 1304 0132 6901      		movw r12,r18
+ 1305 0134 7A01      		movw r14,r20
+ 1306 0136 C40C      		add r12,r4
+ 1307 0138 D51C      		adc r13,r5
+ 1308 013a E61C      		adc r14,r6
+ 1309 013c F71C      		adc r15,r7
+ 1310               	.LBE102:
+ 1311               	.LBE104:
+ 241:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 						uart_puts("Mapping #");
+ 1313               	.LM135:
+ 1314 013e 80E0      		ldi r24,lo8(.LC15)
+ 1315 0140 90E0      		ldi r25,hi8(.LC15)
+ 1316 0142 0E94 0000 		call uart_puts
+ 1317               	.LBB105:
+ 1318               	.LBB106:
+ 1320               	.Ltext23:
+ 1322               	.LM136:
+ 1323 0146 4AE0      		ldi r20,lo8(10)
+ 1324 0148 BE01      		movw r22,r28
+ 1325 014a 6B5B      		subi r22,-69
+ 1326 014c 7F4F      		sbci r23,-1
+ 1327 014e 80E0      		ldi r24,0
+ 1328 0150 90E0      		ldi r25,0
+ 1329 0152 0E94 0000 		call __itoa_ncheck
+ 1330               	.LBE106:
+ 1331               	.LBE105:
+ 1333               	.Ltext24:
+ 242:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 						itoa(tmp, &buf, 10);
+ 243:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 						uart_puts(buf);
+ 1335               	.LM137:
+ 1336 0156 CE01      		movw r24,r28
+ 1337 0158 8B5B      		subi r24,-69
+ 1338 015a 9F4F      		sbci r25,-1
+ 1339 015c 0E94 0000 		call uart_puts
+ 244:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 						uart_puts(" = ");
+ 1341               	.LM138:
+ 1342 0160 80E0      		ldi r24,lo8(.LC16)
+ 1343 0162 90E0      		ldi r25,hi8(.LC16)
+ 1344 0164 0E94 0000 		call uart_puts
+ 1345               	.LBB107:
+ 1346               	.LBB108:
+ 1348               	.Ltext25:
+ 1350               	.LM139:
+ 1351 0168 4AE0      		ldi r20,lo8(10)
+ 1352 016a BE01      		movw r22,r28
+ 1353 016c 6B5B      		subi r22,-69
+ 1354 016e 7F4F      		sbci r23,-1
+ 1355 0170 8C2D      		mov r24,r12
+ 1356 0172 00C0      		rjmp .L74
+ 1357               	.L37:
+ 1358               	.LBE108:
+ 1359               	.LBE107:
+ 1361               	.Ltext26:
+ 245:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 						itoa(chanOut, &buf, 10);
+ 246:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 						uart_puts(buf);
+ 247:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 						uart_puts("\r\n");
+ 248:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 					}
+ 249:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 				}
+ 250:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 			}
+ 251:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 		} else {
+ 252:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 			// Editing
+ 253:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 			if (adcBuffer[currentIdx] < (adcLast[currentIdx] - deadband) | adcBuffer[currentIdx] > (adcLast[
+ 1363               	.LM140:
+ 1364 0174 032D      		mov r16,r3
+ 1365 0176 10E0      		ldi r17,0
+ 1366 0178 C801      		movw r24,r16
+ 1367 017a 880F      		lsl r24
+ 1368 017c 991F      		rol r25
+ 1369 017e FC01      		movw r30,r24
+ 1370 0180 E050      		subi r30,lo8(-(adcBuffer))
+ 1371 0182 F040      		sbci r31,hi8(-(adcBuffer))
+ 1372 0184 2081      		ld r18,Z
+ 1373 0186 3181      		ldd r19,Z+1
+ 1374 0188 FC01      		movw r30,r24
+ 1375 018a E050      		subi r30,lo8(-(adcLast))
+ 1376 018c F040      		sbci r31,hi8(-(adcLast))
+ 1377 018e 8081      		ld r24,Z
+ 1378 0190 9181      		ldd r25,Z+1
+ 1379 0192 AC01      		movw r20,r24
+ 1380 0194 4C5F      		subi r20,-4
+ 1381 0196 5F4F      		sbci r21,-1
+ 1382 0198 4217      		cp r20,r18
+ 1383 019a 5307      		cpc r21,r19
+ 1384 019c 00F0      		brlo .L69
+ 1385 019e 0497      		sbiw r24,4
+ 1386 01a0 2817      		cp r18,r24
+ 1387 01a2 3907      		cpc r19,r25
+ 1388 01a4 00F0      		brlo .+2
+ 1389 01a6 00C0      		rjmp .L43
+ 1390               	.L69:
+ 254:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 				chanOut = map(adcBuffer[currentIdx], currentJoint.lowIn, currentJoint.highIn, currentJoint.lowO
+ 1392               	.LM141:
+ 1393 01a8 C9A8      		ldd r12,Y+49
+ 1394 01aa D12C      		mov r13,__zero_reg__
+ 1395 01ac E12C      		mov r14,__zero_reg__
+ 1396 01ae F12C      		mov r15,__zero_reg__
+ 1397 01b0 4DA4      		ldd r4,Y+45
+ 1398 01b2 5EA4      		ldd r5,Y+46
+ 1399 01b4 612C      		mov r6,__zero_reg__
+ 1400 01b6 712C      		mov r7,__zero_reg__
+ 1401 01b8 40E0      		ldi r20,0
+ 1402 01ba 50E0      		ldi r21,0
+ 1403               	.LBB109:
+ 1404               	.LBB110:
+ 171:/Users/anton/Desktop/AVR/MidiSuit/Main.c ****   return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
+ 1406               	.LM142:
+ 1407 01bc 2419      		sub r18,r4
+ 1408 01be 3509      		sbc r19,r5
+ 1409 01c0 4609      		sbc r20,r6
+ 1410 01c2 5709      		sbc r21,r7
+ 1411               	.LBE110:
+ 1412               	.LBE109:
+ 1414               	.LM143:
+ 1415 01c4 6AA9      		ldd r22,Y+50
+ 1416 01c6 70E0      		ldi r23,0
+ 1417 01c8 80E0      		ldi r24,0
+ 1418 01ca 90E0      		ldi r25,0
+ 1419               	.LBB113:
+ 1420               	.LBB111:
+ 171:/Users/anton/Desktop/AVR/MidiSuit/Main.c ****   return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
+ 1422               	.LM144:
+ 1423 01cc 6C19      		sub r22,r12
+ 1424 01ce 7D09      		sbc r23,r13
+ 1425 01d0 8E09      		sbc r24,r14
+ 1426 01d2 9F09      		sbc r25,r15
+ 1427 01d4 0E94 0000 		call __mulsi3
+ 1428               	.LBE111:
+ 1429               	.LBE113:
+ 1431               	.LM145:
+ 1432 01d8 2FA5      		ldd r18,Y+47
+ 1433 01da 38A9      		ldd r19,Y+48
+ 1434 01dc 40E0      		ldi r20,0
+ 1435 01de 50E0      		ldi r21,0
+ 1436               	.LBB114:
+ 1437               	.LBB112:
+ 171:/Users/anton/Desktop/AVR/MidiSuit/Main.c ****   return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
+ 1439               	.LM146:
+ 1440 01e0 2419      		sub r18,r4
+ 1441 01e2 3509      		sbc r19,r5
+ 1442 01e4 4609      		sbc r20,r6
+ 1443 01e6 5709      		sbc r21,r7
+ 1444 01e8 0E94 0000 		call __divmodsi4
+ 1445 01ec 2901      		movw r4,r18
+ 1446 01ee 3A01      		movw r6,r20
+ 1447 01f0 4C0C      		add r4,r12
+ 1448 01f2 5D1C      		adc r5,r13
+ 1449 01f4 6E1C      		adc r6,r14
+ 1450 01f6 7F1C      		adc r7,r15
+ 1451               	.LBE112:
+ 1452               	.LBE114:
+ 255:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 				uart_puts("E.Mapping #");
+ 1454               	.LM147:
+ 1455 01f8 80E0      		ldi r24,lo8(.LC17)
+ 1456 01fa 90E0      		ldi r25,hi8(.LC17)
+ 1457 01fc 0E94 0000 		call uart_puts
+ 1458               	.LBB115:
+ 1459               	.LBB116:
+ 1461               	.Ltext27:
+ 1463               	.LM148:
+ 1464 0200 4AE0      		ldi r20,lo8(10)
+ 1465 0202 BE01      		movw r22,r28
+ 1466 0204 6B5B      		subi r22,-69
+ 1467 0206 7F4F      		sbci r23,-1
+ 1468 0208 C801      		movw r24,r16
+ 1469 020a 0E94 0000 		call __itoa_ncheck
+ 1470               	.LBE116:
+ 1471               	.LBE115:
+ 1473               	.Ltext28:
+ 256:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 				itoa(currentIdx, &buf, 10);
+ 257:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 				uart_puts(buf);
+ 1475               	.LM149:
+ 1476 020e CE01      		movw r24,r28
+ 1477 0210 8B5B      		subi r24,-69
+ 1478 0212 9F4F      		sbci r25,-1
+ 1479 0214 0E94 0000 		call uart_puts
+ 258:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 				uart_puts(" = ");
+ 1481               	.LM150:
+ 1482 0218 80E0      		ldi r24,lo8(.LC16)
+ 1483 021a 90E0      		ldi r25,hi8(.LC16)
+ 1484 021c 0E94 0000 		call uart_puts
+ 1485               	.LBB117:
+ 1486               	.LBB118:
+ 1488               	.Ltext29:
+ 1490               	.LM151:
+ 1491 0220 4AE0      		ldi r20,lo8(10)
+ 1492 0222 BE01      		movw r22,r28
+ 1493 0224 6B5B      		subi r22,-69
+ 1494 0226 7F4F      		sbci r23,-1
+ 1495 0228 842D      		mov r24,r4
+ 1496               	.L74:
+ 1497 022a 90E0      		ldi r25,0
+ 1498 022c 0E94 0000 		call __itoa_ncheck
+ 1499               	.LBE118:
+ 1500               	.LBE117:
+ 1502               	.Ltext30:
+ 259:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 				itoa(chanOut, &buf, 10);
+ 260:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 				uart_puts(buf);
+ 1504               	.LM152:
+ 1505 0230 CE01      		movw r24,r28
+ 1506 0232 8B5B      		subi r24,-69
+ 1507 0234 9F4F      		sbci r25,-1
+ 1508 0236 0E94 0000 		call uart_puts
+ 261:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 				uart_puts("\r\n");
+ 1510               	.LM153:
+ 1511 023a 80E0      		ldi r24,lo8(.LC2)
+ 1512 023c 90E0      		ldi r25,hi8(.LC2)
+ 1513 023e 0E94 0000 		call uart_puts
+ 1514               	.L43:
+ 262:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 			}
+ 263:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 		}
+ 264:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 			
+ 265:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 			
+ 266:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 			
+ 267:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 		rx = uart_getc();
+ 1516               	.LM154:
+ 1517 0242 0E94 0000 		call uart_getc
+ 268:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 		if (!(rx & UART_NO_DATA) && !cmdWaiting) {
+ 1519               	.LM155:
+ 1520 0246 90FD      		sbrc r25,0
+ 1521 0248 00C0      		rjmp .L47
+ 269:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 			// Data in UART RX buffer
+ 270:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 			cmdIn[cmdCount] = (unsigned char)rx;
+ 1523               	.LM156:
+ 1524 024a 092D      		mov r16,r9
+ 1525 024c 10E0      		ldi r17,0
+ 1526 024e E5E3      		ldi r30,lo8(53)
+ 1527 0250 F0E0      		ldi r31,0
+ 1528 0252 EC0F      		add r30,r28
+ 1529 0254 FD1F      		adc r31,r29
+ 1530 0256 E00F      		add r30,r16
+ 1531 0258 F11F      		adc r31,r17
+ 1532 025a 8083      		st Z,r24
+ 271:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 			if(cmdIn[cmdCount] == '\n') {
+ 1534               	.LM157:
+ 1535 025c 8A30      		cpi r24,lo8(10)
+ 1536 025e 01F0      		breq .L48
+ 272:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 				// We have a newline
+ 273:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 				cmdWaiting = true;
+ 274:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 			} else {
+ 275:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 				cmdCount++;
+ 1538               	.LM158:
+ 1539 0260 9394      		inc r9
+ 276:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 			}
+ 277:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 			if (cmdCount > 16) {
+ 1541               	.LM159:
+ 1542 0262 20E1      		ldi r18,lo8(16)
+ 1543 0264 2915      		cp r18,r9
+ 1544 0266 00F4      		brsh .+2
+ 1545 0268 00C0      		rjmp .L68
+ 1546 026a 00C0      		rjmp .L47
+ 1547               	.L48:
+ 278:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 				cmdCount = 0;
+ 279:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 			}
+ 280:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 		}
+ 281:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 
+ 282:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 		if(cmdWaiting) {			
+ 283:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 			//Process a waiting command
+ 284:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 			if (cmdIn[0] == 'm') {
+ 1549               	.LM160:
+ 1550 026c 8DA9      		ldd r24,Y+53
+ 1551 026e 8D36      		cpi r24,lo8(109)
+ 1552 0270 01F4      		brne .L50
+ 285:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 				tmp = (uint8_t)atoi(&cmdIn[1]);
+ 1554               	.LM161:
+ 1555 0272 CE01      		movw r24,r28
+ 1556 0274 C696      		adiw r24,54
+ 1557 0276 0E94 0000 		call atoi
+ 1558 027a F82E      		mov r15,r24
+ 286:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 				//uart_puts(tmp);
+ 287:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 				//uart_puts("\r\n");
+ 288:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 				if (tmp >= 0 && tmp < 16) {
+ 1560               	.LM162:
+ 1561 027c 8FE0      		ldi r24,lo8(15)
+ 1562 027e 8F15      		cp r24,r15
+ 1563 0280 00F0      		brlo .L50
+ 289:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 					uart_puts("Editing mapping #");
+ 1565               	.LM163:
+ 1566 0282 80E0      		ldi r24,lo8(.LC18)
+ 1567 0284 90E0      		ldi r25,hi8(.LC18)
+ 1568 0286 0E94 0000 		call uart_puts
+ 1569               	.LBB119:
+ 1570               	.LBB120:
+ 1572               	.Ltext31:
+ 1574               	.LM164:
+ 1575 028a 4AE0      		ldi r20,lo8(10)
+ 1576 028c BE01      		movw r22,r28
+ 1577 028e 6B5B      		subi r22,-69
+ 1578 0290 7F4F      		sbci r23,-1
+ 1579 0292 8F2D      		mov r24,r15
+ 1580 0294 90E0      		ldi r25,0
+ 1581 0296 0E94 0000 		call __itoa_ncheck
+ 1582               	.LBE120:
+ 1583               	.LBE119:
+ 1585               	.Ltext32:
+ 290:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 					itoa(tmp, &buf, 10);
+ 291:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 					uart_puts(buf);
+ 1587               	.LM165:
+ 1588 029a CE01      		movw r24,r28
+ 1589 029c 8B5B      		subi r24,-69
+ 1590 029e 9F4F      		sbci r25,-1
+ 1591 02a0 0E94 0000 		call uart_puts
+ 292:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 					uart_puts("\r\n");
+ 1593               	.LM166:
+ 1594 02a4 80E0      		ldi r24,lo8(.LC2)
+ 1595 02a6 90E0      		ldi r25,hi8(.LC2)
+ 1596 02a8 0E94 0000 		call uart_puts
+ 293:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 					currentIdx = tmp;
+ 294:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 					cmdWaiting = false;
+ 295:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 					editing = true;
+ 296:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 					currentJoint = readMapping(currentIdx);
+ 1598               	.LM167:
+ 1599 02ac 6F2D      		mov r22,r15
+ 1600 02ae CE01      		movw r24,r28
+ 1601 02b0 4B96      		adiw r24,27
+ 1602 02b2 0E94 0000 		call readMapping
+ 1603 02b6 3F2C      		mov r3,r15
+ 295:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 					editing = true;
+ 1605               	.LM168:
+ 1606 02b8 2224      		clr r2
+ 1607 02ba 2394      		inc r2
+ 1608               	.L50:
+ 297:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 				}
+ 298:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 			}
+ 299:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 			if (cmdIn[0] == 'p') {
+ 1610               	.LM169:
+ 1611 02bc 8DA9      		ldd r24,Y+53
+ 1612 02be 8037      		cpi r24,lo8(112)
+ 1613 02c0 01F4      		brne .L51
+ 300:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 				// Dump existing mapping
+ 301:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 				dumpMapping(currentJoint);
+ 1615               	.LM170:
+ 1616 02c2 8DB7      		in r24,__SP_L__
+ 1617 02c4 9EB7      		in r25,__SP_H__
+ 1618 02c6 4A97      		sbiw r24,26
+ 1619 02c8 0FB6      		in __tmp_reg__,__SREG__
+ 1620 02ca F894      		cli
+ 1621 02cc 9EBF      		out __SP_H__,r25
+ 1622 02ce 0FBE      		out __SREG__,__tmp_reg__
+ 1623 02d0 8DBF      		out __SP_L__,r24
+ 1624 02d2 ADB7      		in r26,__SP_L__
+ 1625 02d4 BEB7      		in r27,__SP_H__
+ 1626 02d6 1196      		adiw r26,1
+ 1627 02d8 FE01      		movw r30,r28
+ 1628 02da 7B96      		adiw r30,27
+ 1629 02dc 8AE1      		ldi r24,lo8(26)
+ 1630               		0:
+ 1631 02de 0190      		ld r0,Z+
+ 1632 02e0 0D92      		st X+,r0
+ 1633 02e2 8A95      		dec r24
+ 1634 02e4 01F4      		brne 0b
+ 1635 02e6 0E94 0000 		call dumpMapping
+ 1636 02ea 0FB6      		in __tmp_reg__,__SREG__
+ 1637 02ec F894      		cli
+ 1638 02ee DEBF      		out __SP_H__,r29
+ 1639 02f0 0FBE      		out __SREG__,__tmp_reg__
+ 1640 02f2 CDBF      		out __SP_L__,r28
+ 1641               	.L51:
+ 302:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 			}
+ 303:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 			if (cmdIn[0] == 's') {
+ 1643               	.LM171:
+ 1644 02f4 8DA9      		ldd r24,Y+53
+ 1645 02f6 8337      		cpi r24,lo8(115)
+ 1646 02f8 01F4      		brne .L52
+ 304:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 				// Start streaming values
+ 305:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 				uart_puts("Streaming values: \r\n");
+ 1648               	.LM172:
+ 1649 02fa 80E0      		ldi r24,lo8(.LC19)
+ 1650 02fc 90E0      		ldi r25,hi8(.LC19)
+ 1651 02fe 0E94 0000 		call uart_puts
+ 306:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 				stream = true;
+ 1653               	.LM173:
+ 1654 0302 8824      		clr r8
+ 1655 0304 8394      		inc r8
+ 1656               	.L52:
+ 307:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 			}
+ 308:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 			if (cmdIn[0] == 'x') {
+ 1658               	.LM174:
+ 1659 0306 8DA9      		ldd r24,Y+53
+ 1660 0308 8837      		cpi r24,lo8(120)
+ 1661 030a 01F4      		brne .+2
+ 1662 030c 00C0      		rjmp .L75
+ 1663               	.L53:
+ 309:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 				// Stop streaming
+ 310:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 				if (stream) {
+ 311:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 					stream = false;
+ 312:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 					uart_puts("Stop streaming values: \r\n");
+ 313:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 				} else {
+ 314:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 					uart_puts("Exiting edit mode.\r\n");
+ 315:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 					editing = false;
+ 316:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 				}
+ 317:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 			}
+ 318:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 			if (cmdIn[0] == 'w') {
+ 1665               	.LM175:
+ 1666 030e 8DA9      		ldd r24,Y+53
+ 1667 0310 8737      		cpi r24,lo8(119)
+ 1668 0312 01F4      		brne .L55
+ 1669 0314 FE01      		movw r30,r28
+ 1670 0316 7B96      		adiw r30,27
+ 1671 0318 DE01      		movw r26,r28
+ 1672 031a 1196      		adiw r26,1
+ 1673 031c 8AE1      		ldi r24,lo8(26)
+ 1674               		0:
+ 1675 031e 0190      		ld r0,Z+
+ 1676 0320 0D92      		st X+,r0
+ 1677 0322 8A95      		dec r24
+ 1678 0324 01F4      		brne 0b
+ 1679               	.LBB121:
+ 1680               	.LBB98:
+ 110:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 	strncpy(&map.magic, "##", 2);
+ 1682               	.LM176:
+ 1683 0326 BA82      		std Y+2,r11
+ 1684 0328 A982      		std Y+1,r10
+ 111:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 	eeprom_write_block(&map, (mapId * sizeof(map)), sizeof(map));
+ 1686               	.LM177:
+ 1687 032a 9AE1      		ldi r25,lo8(26)
+ 1688 032c 399E      		mul r3,r25
+ 1689 032e B001      		movw r22,r0
+ 1690 0330 1124      		clr __zero_reg__
+ 1691 0332 4AE1      		ldi r20,lo8(26)
+ 1692 0334 50E0      		ldi r21,0
+ 1693 0336 CE01      		movw r24,r28
+ 1694 0338 0196      		adiw r24,1
+ 1695 033a 0E94 0000 		call __eewr_block_m644
+ 1696               	.LBE98:
+ 1697               	.LBE121:
+ 319:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 				// Write to EEPROM
+ 320:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 				writeMapping(currentIdx, currentJoint);
+ 321:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 				uart_puts("Written to EEPROM\r\n");
+ 1699               	.LM178:
+ 1700 033e 80E0      		ldi r24,lo8(.LC22)
+ 1701 0340 90E0      		ldi r25,hi8(.LC22)
+ 1702 0342 0E94 0000 		call uart_puts
+ 1703               	.L55:
+ 322:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 			}
+ 323:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 			if (cmdIn[0] == 'a') {
+ 1705               	.LM179:
+ 1706 0346 8DA9      		ldd r24,Y+53
+ 1707 0348 8136      		cpi r24,lo8(97)
+ 1708 034a 01F4      		brne .L56
+ 324:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 				// Device
+ 325:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 				cmdIn[cmdCount-1] = '\0';
+ 1710               	.LM180:
+ 1711 034c A801      		movw r20,r16
+ 1712 034e 4150      		subi r20,1
+ 1713 0350 5109      		sbc r21,__zero_reg__
+ 1714 0352 E5E3      		ldi r30,lo8(53)
+ 1715 0354 F0E0      		ldi r31,0
+ 1716 0356 EC0F      		add r30,r28
+ 1717 0358 FD1F      		adc r31,r29
+ 1718 035a E40F      		add r30,r20
+ 1719 035c F51F      		adc r31,r21
+ 1720 035e 1082      		st Z,__zero_reg__
+ 326:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 				strncpy(&currentJoint.device, &cmdIn[1], cmdCount-1);
+ 1722               	.LM181:
+ 1723 0360 BE01      		movw r22,r28
+ 1724 0362 6A5C      		subi r22,-54
+ 1725 0364 7F4F      		sbci r23,-1
+ 1726 0366 CE01      		movw r24,r28
+ 1727 0368 4D96      		adiw r24,29
+ 1728 036a 0E94 0000 		call strncpy
+ 1729               	.L56:
+ 327:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 			}
+ 328:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 			if (cmdIn[0] == 'b') {
+ 1731               	.LM182:
+ 1732 036e 8DA9      		ldd r24,Y+53
+ 1733 0370 8236      		cpi r24,lo8(98)
+ 1734 0372 01F4      		brne .L57
+ 329:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 				// Function
+ 330:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 				cmdIn[cmdCount-1] = '\0';
+ 1736               	.LM183:
+ 1737 0374 A801      		movw r20,r16
+ 1738 0376 4150      		subi r20,1
+ 1739 0378 5109      		sbc r21,__zero_reg__
+ 1740 037a E5E3      		ldi r30,lo8(53)
+ 1741 037c F0E0      		ldi r31,0
+ 1742 037e EC0F      		add r30,r28
+ 1743 0380 FD1F      		adc r31,r29
+ 1744 0382 E40F      		add r30,r20
+ 1745 0384 F51F      		adc r31,r21
+ 1746 0386 1082      		st Z,__zero_reg__
+ 331:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 				strncpy(&currentJoint.function, &cmdIn[1], cmdCount-1);
+ 1748               	.LM184:
+ 1749 0388 BE01      		movw r22,r28
+ 1750 038a 6A5C      		subi r22,-54
+ 1751 038c 7F4F      		sbci r23,-1
+ 1752 038e CE01      		movw r24,r28
+ 1753 0390 8596      		adiw r24,37
+ 1754 0392 0E94 0000 		call strncpy
+ 1755               	.L57:
+ 332:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 			}
+ 333:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 			if (cmdIn[0] == 'c') {
+ 1757               	.LM185:
+ 1758 0396 8DA9      		ldd r24,Y+53
+ 1759 0398 8336      		cpi r24,lo8(99)
+ 1760 039a 01F4      		brne .L58
+ 334:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 				// Low In
+ 335:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 				val = atoi(&cmdIn[1]);
+ 1762               	.LM186:
+ 1763 039c CE01      		movw r24,r28
+ 1764 039e C696      		adiw r24,54
+ 1765 03a0 0E94 0000 		call atoi
+ 336:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 				currentJoint.lowIn = val;
+ 1767               	.LM187:
+ 1768 03a4 9EA7      		std Y+46,r25
+ 1769 03a6 8DA7      		std Y+45,r24
+ 1770               	.L68:
+ 337:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 			}
+ 338:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 			if (cmdIn[0] == 'd') {
+ 339:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 				// High In
+ 340:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 				val = atoi(&cmdIn[1]);
+ 341:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 				currentJoint.highIn = val;
+ 342:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 			}
+ 343:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 			if (cmdIn[0] == 'e') {
+ 344:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 				// Low Out
+ 345:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 				tmp = (uint8_t)atoi(&cmdIn[1]);
+ 346:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 				currentJoint.lowOut = tmp;
+ 347:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 			}
+ 348:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 			if (cmdIn[0] == 'f') {
+ 349:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 				// High Out
+ 350:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 				tmp = (uint8_t)atoi(&cmdIn[1]);
+ 351:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 				currentJoint.highOut = tmp;
+ 352:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 			}
+ 353:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 			if (cmdIn[0] == 'g') {
+ 354:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 				// CC
+ 355:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 				tmp = (uint8_t)atoi(&cmdIn[1]);
+ 356:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 				currentJoint.cc = tmp;
+ 357:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 			}
+ 358:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 			if (cmdIn[0] == 'h') {
+ 359:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 				// Channel
+ 360:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 				tmp = (uint8_t)atoi(&cmdIn[1]);
+ 361:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 				currentJoint.channel = tmp;
+ 362:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 			}
+ 363:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 			cmdWaiting = false;
+ 364:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 			cmdCount = 0;
+ 1772               	.LM188:
+ 1773 03a8 912C      		mov r9,__zero_reg__
+ 1774               	.L47:
+ 365:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 		}
+ 366:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 		
+ 367:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 		if (stream) {
+ 1776               	.LM189:
+ 1777 03aa 8820      		tst r8
+ 1778 03ac 01F0      		breq .L64
+ 368:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 			// Stream values for this channel
+ 369:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 			itoa(adcBuffer[currentIdx], &buf, 10);
+ 1780               	.LM190:
+ 1781 03ae E32D      		mov r30,r3
+ 1782 03b0 F0E0      		ldi r31,0
+ 1783 03b2 EE0F      		lsl r30
+ 1784 03b4 FF1F      		rol r31
+ 1785 03b6 E050      		subi r30,lo8(-(adcBuffer))
+ 1786 03b8 F040      		sbci r31,hi8(-(adcBuffer))
+ 1787               	.LBB122:
+ 1788               	.LBB123:
+ 1790               	.Ltext33:
+ 1792               	.LM191:
+ 1793 03ba 4AE0      		ldi r20,lo8(10)
+ 1794 03bc BE01      		movw r22,r28
+ 1795 03be 6B5B      		subi r22,-69
+ 1796 03c0 7F4F      		sbci r23,-1
+ 1797 03c2 8081      		ld r24,Z
+ 1798 03c4 9181      		ldd r25,Z+1
+ 1799 03c6 0E94 0000 		call __itoa_ncheck
+ 1800               	.LBE123:
+ 1801               	.LBE122:
+ 1803               	.Ltext34:
+ 370:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 			uart_puts("Raw: ");
+ 1805               	.LM192:
+ 1806 03ca 80E0      		ldi r24,lo8(.LC23)
+ 1807 03cc 90E0      		ldi r25,hi8(.LC23)
+ 1808 03ce 0E94 0000 		call uart_puts
+ 371:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 			uart_puts(buf);
+ 1810               	.LM193:
+ 1811 03d2 CE01      		movw r24,r28
+ 1812 03d4 8B5B      		subi r24,-69
+ 1813 03d6 9F4F      		sbci r25,-1
+ 1814 03d8 0E94 0000 		call uart_puts
+ 372:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 			uart_puts("\r\n");
+ 1816               	.LM194:
+ 1817 03dc 80E0      		ldi r24,lo8(.LC2)
+ 1818 03de 90E0      		ldi r25,hi8(.LC2)
+ 1819 03e0 0E94 0000 		call uart_puts
+ 1820               	.L64:
+ 1821               	.LBB124:
+ 1822               	.LBB125:
+ 1824               	.Ltext35:
+ 163:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 	__builtin_avr_delay_cycles(__ticks_dc);
+ 1826               	.LM195:
+ 1827 03e4 2FEF      		ldi r18,lo8(479999)
+ 1828 03e6 82E5      		ldi r24,hi8(479999)
+ 1829 03e8 97E0      		ldi r25,hlo8(479999)
+ 1830 03ea 2150      		1: subi r18,1
+ 1831 03ec 8040      		sbci r24,0
+ 1832 03ee 9040      		sbci r25,0
+ 1833 03f0 01F4      		brne 1b
+ 1834 03f2 00C0      		rjmp .
+ 1835 03f4 0000      		nop
+ 1836               	.LBE125:
+ 1837               	.LBE124:
+ 1839               	.Ltext36:
+ 373:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 		}
+ 374:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 
+ 375:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 		
+ 376:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 		// Poke watchdog
+ 377:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 		_delay_ms(150);
+ 378:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 		wdt_reset();	
+ 1841               	.LM196:
+ 1842               	/* #APP */
+ 1843               	 ;  378 "/Users/anton/Desktop/AVR/MidiSuit/Main.c" 1
+ 1844 03f6 A895      		wdr
+ 1845               	 ;  0 "" 2
+ 379:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 	}
+ 1847               	.LM197:
+ 1848               	/* #NOAPP */
+ 1849 03f8 00C0      		rjmp .L65
+ 1850               	.L75:
+ 310:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 				if (stream) {
+ 1852               	.LM198:
+ 1853 03fa 8820      		tst r8
+ 1854 03fc 01F0      		breq .L54
+ 312:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 					uart_puts("Stop streaming values: \r\n");
+ 1856               	.LM199:
+ 1857 03fe 80E0      		ldi r24,lo8(.LC20)
+ 1858 0400 90E0      		ldi r25,hi8(.LC20)
+ 1859 0402 0E94 0000 		call uart_puts
+ 311:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 					stream = false;
+ 1861               	.LM200:
+ 1862 0406 812C      		mov r8,__zero_reg__
+ 1863 0408 00C0      		rjmp .L53
+ 1864               	.L54:
+ 314:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 					uart_puts("Exiting edit mode.\r\n");
+ 1866               	.LM201:
+ 1867 040a 80E0      		ldi r24,lo8(.LC21)
+ 1868 040c 90E0      		ldi r25,hi8(.LC21)
+ 1869 040e 0E94 0000 		call uart_puts
+ 315:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 					editing = false;
+ 1871               	.LM202:
+ 1872 0412 212C      		mov r2,__zero_reg__
+ 1873 0414 00C0      		rjmp .L53
+ 1874               	.L58:
+ 338:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 			if (cmdIn[0] == 'd') {
+ 1876               	.LM203:
+ 1877 0416 8436      		cpi r24,lo8(100)
+ 1878 0418 01F4      		brne .L60
+ 340:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 				val = atoi(&cmdIn[1]);
+ 1880               	.LM204:
+ 1881 041a CE01      		movw r24,r28
+ 1882 041c C696      		adiw r24,54
+ 1883 041e 0E94 0000 		call atoi
+ 341:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 				currentJoint.highIn = val;
+ 1885               	.LM205:
+ 1886 0422 98AB      		std Y+48,r25
+ 1887 0424 8FA7      		std Y+47,r24
+ 1888 0426 00C0      		rjmp .L68
+ 1889               	.L60:
+ 343:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 			if (cmdIn[0] == 'e') {
+ 1891               	.LM206:
+ 1892 0428 8536      		cpi r24,lo8(101)
+ 1893 042a 01F4      		brne .L61
+ 345:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 				tmp = (uint8_t)atoi(&cmdIn[1]);
+ 1895               	.LM207:
+ 1896 042c CE01      		movw r24,r28
+ 1897 042e C696      		adiw r24,54
+ 1898 0430 0E94 0000 		call atoi
+ 1899 0434 89AB      		std Y+49,r24
+ 1900 0436 00C0      		rjmp .L68
+ 1901               	.L61:
+ 348:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 			if (cmdIn[0] == 'f') {
+ 1903               	.LM208:
+ 1904 0438 8636      		cpi r24,lo8(102)
+ 1905 043a 01F4      		brne .L62
+ 350:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 				tmp = (uint8_t)atoi(&cmdIn[1]);
+ 1907               	.LM209:
+ 1908 043c CE01      		movw r24,r28
+ 1909 043e C696      		adiw r24,54
+ 1910 0440 0E94 0000 		call atoi
+ 1911 0444 8AAB      		std Y+50,r24
+ 1912 0446 00C0      		rjmp .L68
+ 1913               	.L62:
+ 353:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 			if (cmdIn[0] == 'g') {
+ 1915               	.LM210:
+ 1916 0448 8736      		cpi r24,lo8(103)
+ 1917 044a 01F4      		brne .L63
+ 355:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 				tmp = (uint8_t)atoi(&cmdIn[1]);
+ 1919               	.LM211:
+ 1920 044c CE01      		movw r24,r28
+ 1921 044e C696      		adiw r24,54
+ 1922 0450 0E94 0000 		call atoi
+ 1923 0454 8BAB      		std Y+51,r24
+ 1924 0456 00C0      		rjmp .L68
+ 1925               	.L63:
+ 358:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 			if (cmdIn[0] == 'h') {
+ 1927               	.LM212:
+ 1928 0458 8836      		cpi r24,lo8(104)
+ 1929 045a 01F0      		breq .+2
+ 1930 045c 00C0      		rjmp .L68
+ 360:/Users/anton/Desktop/AVR/MidiSuit/Main.c **** 				tmp = (uint8_t)atoi(&cmdIn[1]);
+ 1932               	.LM213:
+ 1933 045e CE01      		movw r24,r28
+ 1934 0460 C696      		adiw r24,54
+ 1935 0462 0E94 0000 		call atoi
+ 1936 0466 8CAB      		std Y+52,r24
+ 1937 0468 00C0      		rjmp .L68
+ 1954               	.Lscope9:
+ 1955               	.global	deadband
+ 1956               		.section	.rodata
+ 1959               	deadband:
+ 1960 0008 04        		.byte	4
+ 1961               		.comm	adcLast,44,1
+ 1962               		.comm	adcBuffer,44,1
+ 1966               		.text
+ 1968               	.Letext0:
+ 1969               		.ident	"GCC: (GNU) 4.8.1"
+ 1970               	.global __do_copy_data
+ 1971               	.global __do_clear_bss
+DEFINED SYMBOLS
+                            *ABS*:00000000 Main.c
+/var/folders/d3/vm4w85hd2jvg0pwrffh_xdvw0000gn/T//ccyN1ARq.s:2      *ABS*:0000003e __SP_H__
+/var/folders/d3/vm4w85hd2jvg0pwrffh_xdvw0000gn/T//ccyN1ARq.s:3      *ABS*:0000003d __SP_L__
+/var/folders/d3/vm4w85hd2jvg0pwrffh_xdvw0000gn/T//ccyN1ARq.s:4      *ABS*:0000003f __SREG__
+/var/folders/d3/vm4w85hd2jvg0pwrffh_xdvw0000gn/T//ccyN1ARq.s:5      *ABS*:00000000 __tmp_reg__
+/var/folders/d3/vm4w85hd2jvg0pwrffh_xdvw0000gn/T//ccyN1ARq.s:6      *ABS*:00000001 __zero_reg__
+/var/folders/d3/vm4w85hd2jvg0pwrffh_xdvw0000gn/T//ccyN1ARq.s:127    .text:00000000 spi_mode
+/var/folders/d3/vm4w85hd2jvg0pwrffh_xdvw0000gn/T//ccyN1ARq.s:149    .text:00000008 spi_transfer
+/var/folders/d3/vm4w85hd2jvg0pwrffh_xdvw0000gn/T//ccyN1ARq.s:180    .text:00000014 readADC
+                            *COM*:0000002c adcLast
+                            *COM*:0000002c adcBuffer
+/var/folders/d3/vm4w85hd2jvg0pwrffh_xdvw0000gn/T//ccyN1ARq.s:424    .text:00000110 readMapping
+/var/folders/d3/vm4w85hd2jvg0pwrffh_xdvw0000gn/T//ccyN1ARq.s:497    .text:0000016e writeMapping
+/var/folders/d3/vm4w85hd2jvg0pwrffh_xdvw0000gn/T//ccyN1ARq.s:560    .text:00000198 dumpMapping
+/var/folders/d3/vm4w85hd2jvg0pwrffh_xdvw0000gn/T//ccyN1ARq.s:856    .text:000002fe monitorMode
+/var/folders/d3/vm4w85hd2jvg0pwrffh_xdvw0000gn/T//ccyN1ARq.s:941    .text:00000352 map
+/var/folders/d3/vm4w85hd2jvg0pwrffh_xdvw0000gn/T//ccyN1ARq.s:1055   .text.startup:00000000 main
+/var/folders/d3/vm4w85hd2jvg0pwrffh_xdvw0000gn/T//ccyN1ARq.s:1959   .rodata:00000008 deadband
+
+UNDEFINED SYMBOLS
+__eerd_block_m644
+uart_puts
+__eewr_block_m644
+__itoa_ncheck
+uart_getc
+__mulsi3
+__divmodsi4
+uart_init
+atoi
+strncpy
+__do_copy_data
+__do_clear_bss

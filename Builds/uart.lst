@@ -1,0 +1,810 @@
+   1               		.file	"uart.c"
+   2               	__SP_H__ = 0x3e
+   3               	__SP_L__ = 0x3d
+   4               	__SREG__ = 0x3f
+   5               	__tmp_reg__ = 0
+   6               	__zero_reg__ = 1
+   8               		.text
+   9               	.Ltext0:
+ 107               	.global	__vector_20
+ 109               	__vector_20:
+   1:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** /*************************************************************************
+   2:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** Title:    Interrupt UART library with receive/transmit circular buffers
+   3:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** Author:   Peter Fleury <pfleury@gmx.ch>   http://jump.to/fleury
+   4:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** File:     $Id: uart.c,v 1.10 2013/06/02 07:27:04 peter Exp $
+   5:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** Software: AVR-GCC 4.1, AVR Libc 1.4.6 or higher
+   6:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** Hardware: any AVR with built-in UART, 
+   7:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** License:  GNU General Public License 
+   8:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****           
+   9:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** DESCRIPTION:
+  10:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     An interrupt is generated when the UART has finished transmitting or
+  11:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     receiving a byte. The interrupt handling routines use circular buffers
+  12:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     for buffering received and transmitted data.
+  13:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     
+  14:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     The UART_RX_BUFFER_SIZE and UART_TX_BUFFER_SIZE variables define
+  15:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     the buffer size in bytes. Note that these variables must be a 
+  16:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     power of 2.
+  17:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     
+  18:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** USAGE:
+  19:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     Refere to the header file uart.h for a description of the routines. 
+  20:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     See also example test_uart.c.
+  21:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** 
+  22:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** NOTES:
+  23:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     Based on Atmel Application Note AVR306
+  24:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****                     
+  25:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** LICENSE:
+  26:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     Copyright (C) 2006 Peter Fleury
+  27:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** 
+  28:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     This program is free software; you can redistribute it and/or modify
+  29:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     it under the terms of the GNU General Public License as published by
+  30:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     the Free Software Foundation; either version 2 of the License, or
+  31:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     any later version.
+  32:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** 
+  33:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     This program is distributed in the hope that it will be useful,
+  34:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     but WITHOUT ANY WARRANTY; without even the implied warranty of
+  35:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+  36:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     GNU General Public License for more details.
+  37:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****                         
+  38:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** *************************************************************************/
+  39:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** #include <avr/io.h>
+  40:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** #include <avr/interrupt.h>
+  41:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** #include <avr/pgmspace.h>
+  42:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** #include "uart.h"
+  43:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** 
+  44:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** 
+  45:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** /*
+  46:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  *  constants and macros
+  47:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  */
+  48:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** 
+  49:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** /* size of RX/TX buffers */
+  50:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** #define UART_RX_BUFFER_MASK ( UART_RX_BUFFER_SIZE - 1)
+  51:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** #define UART_TX_BUFFER_MASK ( UART_TX_BUFFER_SIZE - 1)
+  52:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** 
+  53:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** #if ( UART_RX_BUFFER_SIZE & UART_RX_BUFFER_MASK )
+  54:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** #error RX buffer size is not a power of 2
+  55:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** #endif
+  56:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** #if ( UART_TX_BUFFER_SIZE & UART_TX_BUFFER_MASK )
+  57:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** #error TX buffer size is not a power of 2
+  58:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** #endif
+  59:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** 
+  60:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** #if defined(__AVR_AT90S2313__) \
+  61:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  || defined(__AVR_AT90S4414__) || defined(__AVR_AT90S4434__) \
+  62:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  || defined(__AVR_AT90S8515__) || defined(__AVR_AT90S8535__) \
+  63:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  || defined(__AVR_ATmega103__)
+  64:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  /* old AVR classic or ATmega103 with one UART */
+  65:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  #define AT90_UART
+  66:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  #define UART0_RECEIVE_INTERRUPT   UART_RX_vect 
+  67:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  #define UART0_TRANSMIT_INTERRUPT  UART_UDRE_vect
+  68:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  #define UART0_STATUS   USR
+  69:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  #define UART0_CONTROL  UCR
+  70:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  #define UART0_DATA     UDR  
+  71:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  #define UART0_UDRIE    UDRIE
+  72:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** #elif defined(__AVR_AT90S2333__) || defined(__AVR_AT90S4433__)
+  73:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  /* old AVR classic with one UART */
+  74:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  #define AT90_UART
+  75:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  #define UART0_RECEIVE_INTERRUPT   UART_RX_vect 
+  76:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  #define UART0_TRANSMIT_INTERRUPT  UART_UDRE_vect
+  77:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  #define UART0_STATUS   UCSRA
+  78:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  #define UART0_CONTROL  UCSRB
+  79:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  #define UART0_DATA     UDR 
+  80:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  #define UART0_UDRIE    UDRIE
+  81:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** #elif  defined(__AVR_ATmega8__) || defined(__AVR_ATmega16__) || defined(__AVR_ATmega32__) \
+  82:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****   || defined(__AVR_ATmega323__)
+  83:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****   /* ATmega with one USART */
+  84:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  #define ATMEGA_USART
+  85:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  #define UART0_RECEIVE_INTERRUPT   USART_RXC_vect
+  86:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  #define UART0_TRANSMIT_INTERRUPT  USART_UDRE_vect
+  87:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  #define UART0_STATUS   UCSRA
+  88:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  #define UART0_CONTROL  UCSRB
+  89:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  #define UART0_DATA     UDR
+  90:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  #define UART0_UDRIE    UDRIE
+  91:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** #elif defined (__AVR_ATmega8515__) || defined(__AVR_ATmega8535__)
+  92:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  #define ATMEGA_USART
+  93:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  #define UART0_RECEIVE_INTERRUPT   USART_RX_vect
+  94:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  #define UART0_TRANSMIT_INTERRUPT  USART_UDRE_vect
+  95:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  #define UART0_STATUS   UCSRA
+  96:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  #define UART0_CONTROL  UCSRB
+  97:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  #define UART0_DATA     UDR
+  98:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  #define UART0_UDRIE    UDRIE
+  99:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** #elif defined(__AVR_ATmega163__)
+ 100:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****   /* ATmega163 with one UART */
+ 101:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  #define ATMEGA_UART
+ 102:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  #define UART0_RECEIVE_INTERRUPT   UART_RX_vect
+ 103:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  #define UART0_TRANSMIT_INTERRUPT  UART_UDRE_vect
+ 104:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  #define UART0_STATUS   UCSRA
+ 105:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  #define UART0_CONTROL  UCSRB
+ 106:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  #define UART0_DATA     UDR
+ 107:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  #define UART0_UDRIE    UDRIE
+ 108:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** #elif defined(__AVR_ATmega162__) 
+ 109:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  /* ATmega with two USART */
+ 110:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  #define ATMEGA_USART0
+ 111:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  #define ATMEGA_USART1
+ 112:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  #define UART0_RECEIVE_INTERRUPT   USART0_RXC_vect
+ 113:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  #define UART1_RECEIVE_INTERRUPT   USART1_RXC_vect
+ 114:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  #define UART0_TRANSMIT_INTERRUPT  USART0_UDRE_vect
+ 115:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  #define UART1_TRANSMIT_INTERRUPT  USART1_UDRE_vect
+ 116:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  #define UART0_STATUS   UCSR0A
+ 117:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  #define UART0_CONTROL  UCSR0B
+ 118:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  #define UART0_DATA     UDR0
+ 119:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  #define UART0_UDRIE    UDRIE0
+ 120:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  #define UART1_STATUS   UCSR1A
+ 121:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  #define UART1_CONTROL  UCSR1B
+ 122:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  #define UART1_DATA     UDR1
+ 123:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  #define UART1_UDRIE    UDRIE1
+ 124:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** #elif defined(__AVR_ATmega64__) || defined(__AVR_ATmega128__) 
+ 125:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  /* ATmega with two USART */
+ 126:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  #define ATMEGA_USART0
+ 127:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  #define ATMEGA_USART1
+ 128:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  #define UART0_RECEIVE_INTERRUPT   USART0_RX_vect
+ 129:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  #define UART1_RECEIVE_INTERRUPT   USART1_RX_vect
+ 130:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  #define UART0_TRANSMIT_INTERRUPT  USART0_UDRE_vect
+ 131:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  #define UART1_TRANSMIT_INTERRUPT  USART1_UDRE_vect
+ 132:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  #define UART0_STATUS   UCSR0A
+ 133:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  #define UART0_CONTROL  UCSR0B
+ 134:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  #define UART0_DATA     UDR0
+ 135:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  #define UART0_UDRIE    UDRIE0
+ 136:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  #define UART1_STATUS   UCSR1A
+ 137:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  #define UART1_CONTROL  UCSR1B
+ 138:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  #define UART1_DATA     UDR1
+ 139:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  #define UART1_UDRIE    UDRIE1
+ 140:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** #elif defined(__AVR_ATmega161__)
+ 141:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  /* ATmega with UART */
+ 142:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  #error "AVR ATmega161 currently not supported by this libaray !"
+ 143:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** #elif defined(__AVR_ATmega169__) 
+ 144:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  /* ATmega with one USART */
+ 145:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  #define ATMEGA_USART
+ 146:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  #define UART0_RECEIVE_INTERRUPT   USART0_RX_vect
+ 147:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  #define UART0_TRANSMIT_INTERRUPT  USART0_UDRE_vect
+ 148:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  #define UART0_STATUS   UCSRA
+ 149:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  #define UART0_CONTROL  UCSRB
+ 150:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  #define UART0_DATA     UDR
+ 151:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  #define UART0_UDRIE    UDRIE
+ 152:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** #elif defined(__AVR_ATmega48__) || defined(__AVR_ATmega88__) || defined(__AVR_ATmega168__) || defin
+ 153:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  || defined(__AVR_ATmega3250__) || defined(__AVR_ATmega3290__) ||defined(__AVR_ATmega6450__) || def
+ 154:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  /* ATmega with one USART */
+ 155:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  #define ATMEGA_USART0
+ 156:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  #define UART0_RECEIVE_INTERRUPT   USART_RX_vect
+ 157:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  #define UART0_TRANSMIT_INTERRUPT  USART_UDRE_vect
+ 158:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  #define UART0_STATUS   UCSR0A
+ 159:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  #define UART0_CONTROL  UCSR0B
+ 160:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  #define UART0_DATA     UDR0
+ 161:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  #define UART0_UDRIE    UDRIE0
+ 162:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** #elif defined(__AVR_ATtiny2313__) 
+ 163:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  #define ATMEGA_USART
+ 164:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  #define UART0_RECEIVE_INTERRUPT   USART_RX_vect
+ 165:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  #define UART0_TRANSMIT_INTERRUPT  USART_UDRE_vect
+ 166:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  #define UART0_STATUS   UCSRA
+ 167:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  #define UART0_CONTROL  UCSRB
+ 168:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  #define UART0_DATA     UDR
+ 169:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  #define UART0_UDRIE    UDRIE
+ 170:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** #elif defined(__AVR_ATmega329__) || \
+ 171:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****       defined(__AVR_ATmega649__) || \
+ 172:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****       defined(__AVR_ATmega325__) || \
+ 173:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****       defined(__AVR_ATmega645__) 
+ 174:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****   /* ATmega with one USART */
+ 175:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****   #define ATMEGA_USART0
+ 176:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****   #define UART0_RECEIVE_INTERRUPT   USART0_RX_vect
+ 177:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****   #define UART0_TRANSMIT_INTERRUPT  USART0_UDRE_vect
+ 178:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****   #define UART0_STATUS   UCSR0A
+ 179:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****   #define UART0_CONTROL  UCSR0B
+ 180:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****   #define UART0_DATA     UDR0
+ 181:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****   #define UART0_UDRIE    UDRIE0
+ 182:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** #elif defined(__AVR_ATmega2560__) || defined(__AVR_ATmega2561__) || defined(__AVR_ATmega1280__)  ||
+ 183:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** /* ATmega with two USART */
+ 184:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****   #define ATMEGA_USART0
+ 185:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****   #define ATMEGA_USART1
+ 186:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****   #define UART0_RECEIVE_INTERRUPT   USART0_RX_vect
+ 187:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****   #define UART1_RECEIVE_INTERRUPT   USART1_RX_vect
+ 188:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****   #define UART0_TRANSMIT_INTERRUPT  USART0_UDRE_vect
+ 189:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****   #define UART1_TRANSMIT_INTERRUPT  USART1_UDRE_vect
+ 190:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****   #define UART0_STATUS   UCSR0A
+ 191:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****   #define UART0_CONTROL  UCSR0B
+ 192:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****   #define UART0_DATA     UDR0
+ 193:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****   #define UART0_UDRIE    UDRIE0
+ 194:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****   #define UART1_STATUS   UCSR1A
+ 195:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****   #define UART1_CONTROL  UCSR1B
+ 196:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****   #define UART1_DATA     UDR1
+ 197:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****   #define UART1_UDRIE    UDRIE1  
+ 198:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** #elif defined(__AVR_ATmega644__)
+ 199:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  /* ATmega with one USART */
+ 200:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  #define ATMEGA_USART0
+ 201:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  #define UART0_RECEIVE_INTERRUPT   USART0_RX_vect
+ 202:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  #define UART0_TRANSMIT_INTERRUPT  USART0_UDRE_vect
+ 203:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  #define UART0_STATUS   UCSR0A
+ 204:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  #define UART0_CONTROL  UCSR0B
+ 205:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  #define UART0_DATA     UDR0
+ 206:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  #define UART0_UDRIE    UDRIE0
+ 207:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** #elif defined(__AVR_ATmega164P__) || defined(__AVR_ATmega324P__) || defined(__AVR_ATmega644P__)
+ 208:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  /* ATmega with two USART */
+ 209:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  #define ATMEGA_USART0
+ 210:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  #define ATMEGA_USART1
+ 211:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  #define UART0_RECEIVE_INTERRUPT   USART0_RX_vect
+ 212:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  #define UART1_RECEIVE_INTERRUPT   USART1_RX_vect
+ 213:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  #define UART0_TRANSMIT_INTERRUPT  USART0_UDRE_vect
+ 214:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  #define UART1_TRANSMIT_INTERRUPT  USART1_UDRE_vect
+ 215:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  #define UART0_STATUS   UCSR0A
+ 216:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  #define UART0_CONTROL  UCSR0B
+ 217:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  #define UART0_DATA     UDR0
+ 218:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  #define UART0_UDRIE    UDRIE0
+ 219:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  #define UART1_STATUS   UCSR1A
+ 220:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  #define UART1_CONTROL  UCSR1B
+ 221:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  #define UART1_DATA     UDR1
+ 222:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  #define UART1_UDRIE    UDRIE1
+ 223:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** #else
+ 224:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  #error "no UART definition for MCU available"
+ 225:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** #endif
+ 226:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** 
+ 227:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** 
+ 228:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** /*
+ 229:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  *  module global variables
+ 230:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  */
+ 231:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** static volatile unsigned char UART_TxBuf[UART_TX_BUFFER_SIZE];
+ 232:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** static volatile unsigned char UART_RxBuf[UART_RX_BUFFER_SIZE];
+ 233:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** static volatile unsigned char UART_TxHead;
+ 234:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** static volatile unsigned char UART_TxTail;
+ 235:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** static volatile unsigned char UART_RxHead;
+ 236:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** static volatile unsigned char UART_RxTail;
+ 237:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** static volatile unsigned char UART_LastRxError;
+ 238:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** 
+ 239:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** #if defined( ATMEGA_USART1 )
+ 240:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** static volatile unsigned char UART1_TxBuf[UART_TX_BUFFER_SIZE];
+ 241:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** static volatile unsigned char UART1_RxBuf[UART_RX_BUFFER_SIZE];
+ 242:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** static volatile unsigned char UART1_TxHead;
+ 243:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** static volatile unsigned char UART1_TxTail;
+ 244:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** static volatile unsigned char UART1_RxHead;
+ 245:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** static volatile unsigned char UART1_RxTail;
+ 246:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** static volatile unsigned char UART1_LastRxError;
+ 247:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** #endif
+ 248:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** 
+ 249:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** 
+ 250:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** 
+ 251:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** ISR (UART0_RECEIVE_INTERRUPT)	
+ 252:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** /*************************************************************************
+ 253:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** Function: UART Receive Complete interrupt
+ 254:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** Purpose:  called when the UART has received a character
+ 255:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** **************************************************************************/
+ 256:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** {
+ 111               	.LM0:
+ 112               	.LFBB1:
+ 113 0000 1F92      		push r1
+ 114 0002 0F92      		push r0
+ 115 0004 0FB6      		in r0,__SREG__
+ 116 0006 0F92      		push r0
+ 117 0008 1124      		clr __zero_reg__
+ 118 000a 2F93      		push r18
+ 119 000c 8F93      		push r24
+ 120 000e 9F93      		push r25
+ 121 0010 EF93      		push r30
+ 122 0012 FF93      		push r31
+ 123               	/* prologue: Signal */
+ 124               	/* frame size = 0 */
+ 125               	/* stack size = 8 */
+ 126               	.L__stack_usage = 8
+ 257:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     unsigned char tmphead;
+ 258:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     unsigned char data;
+ 259:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     unsigned char usr;
+ 260:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     unsigned char lastRxError;
+ 261:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  
+ 262:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****  
+ 263:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     /* read UART status register and UART data register */ 
+ 264:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     usr  = UART0_STATUS;
+ 128               	.LM1:
+ 129 0014 8091 C000 		lds r24,192
+ 265:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     data = UART0_DATA;
+ 131               	.LM2:
+ 132 0018 9091 C600 		lds r25,198
+ 266:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     
+ 267:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     /* */
+ 268:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** #if defined( AT90_UART )
+ 269:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     lastRxError = (usr & (_BV(FE)|_BV(DOR)) );
+ 270:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** #elif defined( ATMEGA_USART )
+ 271:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     lastRxError = (usr & (_BV(FE)|_BV(DOR)) );
+ 272:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** #elif defined( ATMEGA_USART0 )
+ 273:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     lastRxError = (usr & (_BV(FE0)|_BV(DOR0)) );
+ 134               	.LM3:
+ 135 001c 8871      		andi r24,lo8(24)
+ 274:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** #elif defined ( ATMEGA_UART )
+ 275:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     lastRxError = (usr & (_BV(FE)|_BV(DOR)) );
+ 276:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** #endif
+ 277:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****         
+ 278:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     /* calculate buffer index */ 
+ 279:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     tmphead = ( UART_RxHead + 1) & UART_RX_BUFFER_MASK;
+ 137               	.LM4:
+ 138 001e E091 0000 		lds r30,UART_RxHead
+ 139 0022 EF5F      		subi r30,lo8(-(1))
+ 140 0024 EF71      		andi r30,lo8(31)
+ 280:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     
+ 281:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     if ( tmphead == UART_RxTail ) {
+ 142               	.LM5:
+ 143 0026 2091 0000 		lds r18,UART_RxTail
+ 144 002a E217      		cp r30,r18
+ 145 002c 01F0      		breq .L3
+ 282:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****         /* error: receive buffer overflow */
+ 283:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****         lastRxError = UART_BUFFER_OVERFLOW >> 8;
+ 284:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     }else{
+ 285:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****         /* store new index */
+ 286:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****         UART_RxHead = tmphead;
+ 147               	.LM6:
+ 148 002e E093 0000 		sts UART_RxHead,r30
+ 287:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****         /* store received data in buffer */
+ 288:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****         UART_RxBuf[tmphead] = data;
+ 150               	.LM7:
+ 151 0032 F0E0      		ldi r31,0
+ 152 0034 E050      		subi r30,lo8(-(UART_RxBuf))
+ 153 0036 F040      		sbci r31,hi8(-(UART_RxBuf))
+ 154 0038 9083      		st Z,r25
+ 155 003a 00C0      		rjmp .L2
+ 156               	.L3:
+ 283:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****         lastRxError = UART_BUFFER_OVERFLOW >> 8;
+ 158               	.LM8:
+ 159 003c 82E0      		ldi r24,lo8(2)
+ 160               	.L2:
+ 289:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     }
+ 290:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     UART_LastRxError |= lastRxError;   
+ 162               	.LM9:
+ 163 003e 9091 0000 		lds r25,UART_LastRxError
+ 164 0042 982B      		or r25,r24
+ 165 0044 9093 0000 		sts UART_LastRxError,r25
+ 166               	/* epilogue start */
+ 291:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** }
+ 168               	.LM10:
+ 169 0048 FF91      		pop r31
+ 170 004a EF91      		pop r30
+ 171 004c 9F91      		pop r25
+ 172 004e 8F91      		pop r24
+ 173 0050 2F91      		pop r18
+ 174 0052 0F90      		pop r0
+ 175 0054 0FBE      		out __SREG__,r0
+ 176 0056 0F90      		pop r0
+ 177 0058 1F90      		pop r1
+ 178 005a 1895      		reti
+ 185               	.Lscope1:
+ 187               	.global	__vector_21
+ 189               	__vector_21:
+ 292:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** 
+ 293:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** 
+ 294:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** ISR (UART0_TRANSMIT_INTERRUPT)
+ 295:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** /*************************************************************************
+ 296:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** Function: UART Data Register Empty interrupt
+ 297:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** Purpose:  called when the UART is ready to transmit the next byte
+ 298:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** **************************************************************************/
+ 299:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** {
+ 191               	.LM11:
+ 192               	.LFBB2:
+ 193 005c 1F92      		push r1
+ 194 005e 0F92      		push r0
+ 195 0060 0FB6      		in r0,__SREG__
+ 196 0062 0F92      		push r0
+ 197 0064 1124      		clr __zero_reg__
+ 198 0066 8F93      		push r24
+ 199 0068 9F93      		push r25
+ 200 006a EF93      		push r30
+ 201 006c FF93      		push r31
+ 202               	/* prologue: Signal */
+ 203               	/* frame size = 0 */
+ 204               	/* stack size = 7 */
+ 205               	.L__stack_usage = 7
+ 300:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     unsigned char tmptail;
+ 301:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** 
+ 302:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     
+ 303:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     if ( UART_TxHead != UART_TxTail) {
+ 207               	.LM12:
+ 208 006e 9091 0000 		lds r25,UART_TxHead
+ 209 0072 8091 0000 		lds r24,UART_TxTail
+ 210 0076 9817      		cp r25,r24
+ 211 0078 01F0      		breq .L6
+ 304:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****         /* calculate and store new buffer index */
+ 305:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****         tmptail = (UART_TxTail + 1) & UART_TX_BUFFER_MASK;
+ 213               	.LM13:
+ 214 007a E091 0000 		lds r30,UART_TxTail
+ 215 007e EF5F      		subi r30,lo8(-(1))
+ 216 0080 EF71      		andi r30,lo8(31)
+ 306:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****         UART_TxTail = tmptail;
+ 218               	.LM14:
+ 219 0082 E093 0000 		sts UART_TxTail,r30
+ 307:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****         /* get one byte from buffer and write it to UART */
+ 308:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****         UART0_DATA = UART_TxBuf[tmptail];  /* start transmission */
+ 221               	.LM15:
+ 222 0086 F0E0      		ldi r31,0
+ 223 0088 E050      		subi r30,lo8(-(UART_TxBuf))
+ 224 008a F040      		sbci r31,hi8(-(UART_TxBuf))
+ 225 008c 8081      		ld r24,Z
+ 226 008e 8093 C600 		sts 198,r24
+ 227 0092 00C0      		rjmp .L5
+ 228               	.L6:
+ 309:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     }else{
+ 310:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****         /* tx buffer empty, disable UDRE interrupt */
+ 311:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****         UART0_CONTROL &= ~_BV(UART0_UDRIE);
+ 230               	.LM16:
+ 231 0094 8091 C100 		lds r24,193
+ 232 0098 8F7D      		andi r24,lo8(-33)
+ 233 009a 8093 C100 		sts 193,r24
+ 234               	.L5:
+ 235               	/* epilogue start */
+ 312:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     }
+ 313:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** }
+ 237               	.LM17:
+ 238 009e FF91      		pop r31
+ 239 00a0 EF91      		pop r30
+ 240 00a2 9F91      		pop r25
+ 241 00a4 8F91      		pop r24
+ 242 00a6 0F90      		pop r0
+ 243 00a8 0FBE      		out __SREG__,r0
+ 244 00aa 0F90      		pop r0
+ 245 00ac 1F90      		pop r1
+ 246 00ae 1895      		reti
+ 251               	.Lscope2:
+ 254               	.global	uart_init
+ 256               	uart_init:
+ 314:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** 
+ 315:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** 
+ 316:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** /*************************************************************************
+ 317:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** Function: uart_init()
+ 318:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** Purpose:  initialize UART and set baudrate
+ 319:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** Input:    baudrate using macro UART_BAUD_SELECT()
+ 320:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** Returns:  none
+ 321:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** **************************************************************************/
+ 322:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** void uart_init(unsigned int baudrate)
+ 323:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** {
+ 258               	.LM18:
+ 259               	.LFBB3:
+ 260               	/* prologue: function */
+ 261               	/* frame size = 0 */
+ 262               	/* stack size = 0 */
+ 263               	.L__stack_usage = 0
+ 324:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     UART_TxHead = 0;
+ 265               	.LM19:
+ 266 00b0 1092 0000 		sts UART_TxHead,__zero_reg__
+ 325:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     UART_TxTail = 0;
+ 268               	.LM20:
+ 269 00b4 1092 0000 		sts UART_TxTail,__zero_reg__
+ 326:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     UART_RxHead = 0;
+ 271               	.LM21:
+ 272 00b8 1092 0000 		sts UART_RxHead,__zero_reg__
+ 327:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     UART_RxTail = 0;
+ 274               	.LM22:
+ 275 00bc 1092 0000 		sts UART_RxTail,__zero_reg__
+ 328:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     
+ 329:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** #if defined( AT90_UART )
+ 330:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     /* set baud rate */
+ 331:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     UBRR = (unsigned char)baudrate; 
+ 332:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** 
+ 333:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     /* enable UART receiver and transmmitter and receive complete interrupt */
+ 334:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     UART0_CONTROL = _BV(RXCIE)|_BV(RXEN)|_BV(TXEN);
+ 335:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** 
+ 336:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** #elif defined (ATMEGA_USART)
+ 337:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     /* Set baud rate */
+ 338:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     if ( baudrate & 0x8000 )
+ 339:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     {
+ 340:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     	 UART0_STATUS = (1<<U2X);  //Enable 2x speed 
+ 341:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     	 baudrate &= ~0x8000;
+ 342:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     }
+ 343:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     UBRRH = (unsigned char)(baudrate>>8);
+ 344:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     UBRRL = (unsigned char) baudrate;
+ 345:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****    
+ 346:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     /* Enable USART receiver and transmitter and receive complete interrupt */
+ 347:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     UART0_CONTROL = _BV(RXCIE)|(1<<RXEN)|(1<<TXEN);
+ 348:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     
+ 349:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     /* Set frame format: asynchronous, 8data, no parity, 1stop bit */
+ 350:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     #ifdef URSEL
+ 351:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     UCSRC = (1<<URSEL)|(3<<UCSZ0);
+ 352:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     #else
+ 353:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     UCSRC = (3<<UCSZ0);
+ 354:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     #endif 
+ 355:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     
+ 356:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** #elif defined (ATMEGA_USART0 )
+ 357:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     /* Set baud rate */
+ 358:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     if ( baudrate & 0x8000 ) 
+ 277               	.LM23:
+ 278 00c0 97FF      		sbrs r25,7
+ 279 00c2 00C0      		rjmp .L9
+ 359:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     {
+ 360:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****    		UART0_STATUS = (1<<U2X0);  //Enable 2x speed 
+ 281               	.LM24:
+ 282 00c4 22E0      		ldi r18,lo8(2)
+ 283 00c6 2093 C000 		sts 192,r18
+ 361:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****    		baudrate &= ~0x8000;
+ 285               	.LM25:
+ 286 00ca 9F77      		andi r25,127
+ 287               	.L9:
+ 362:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****    	}
+ 363:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     UBRR0H = (unsigned char)(baudrate>>8);
+ 289               	.LM26:
+ 290 00cc 9093 C500 		sts 197,r25
+ 364:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     UBRR0L = (unsigned char) baudrate;
+ 292               	.LM27:
+ 293 00d0 8093 C400 		sts 196,r24
+ 365:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** 
+ 366:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     /* Enable USART receiver and transmitter and receive complete interrupt */
+ 367:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     UART0_CONTROL = _BV(RXCIE0)|(1<<RXEN0)|(1<<TXEN0);
+ 295               	.LM28:
+ 296 00d4 88E9      		ldi r24,lo8(-104)
+ 297 00d6 8093 C100 		sts 193,r24
+ 368:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     
+ 369:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     /* Set frame format: asynchronous, 8data, no parity, 1stop bit */
+ 370:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     #ifdef URSEL0
+ 371:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     UCSR0C = (1<<URSEL0)|(3<<UCSZ00);
+ 372:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     #else
+ 373:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     UCSR0C = (3<<UCSZ00);
+ 299               	.LM29:
+ 300 00da 86E0      		ldi r24,lo8(6)
+ 301 00dc 8093 C200 		sts 194,r24
+ 302 00e0 0895      		ret
+ 304               	.Lscope3:
+ 306               	.global	uart_getc
+ 308               	uart_getc:
+ 374:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     #endif 
+ 375:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** 
+ 376:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** #elif defined ( ATMEGA_UART )
+ 377:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     /* set baud rate */
+ 378:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     if ( baudrate & 0x8000 ) 
+ 379:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     {
+ 380:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     	UART0_STATUS = (1<<U2X);  //Enable 2x speed 
+ 381:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     	baudrate &= ~0x8000;
+ 382:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     }
+ 383:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     UBRRHI = (unsigned char)(baudrate>>8);
+ 384:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     UBRR   = (unsigned char) baudrate;
+ 385:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** 
+ 386:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     /* Enable UART receiver and transmitter and receive complete interrupt */
+ 387:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     UART0_CONTROL = _BV(RXCIE)|(1<<RXEN)|(1<<TXEN);
+ 388:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** 
+ 389:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** #endif
+ 390:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** 
+ 391:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** }/* uart_init */
+ 392:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** 
+ 393:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** 
+ 394:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** /*************************************************************************
+ 395:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** Function: uart_getc()
+ 396:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** Purpose:  return byte from ringbuffer  
+ 397:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** Returns:  lower byte:  received byte from ringbuffer
+ 398:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****           higher byte: last receive error
+ 399:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** **************************************************************************/
+ 400:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** unsigned int uart_getc(void)
+ 401:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** {    
+ 310               	.LM30:
+ 311               	.LFBB4:
+ 312               	/* prologue: function */
+ 313               	/* frame size = 0 */
+ 314               	/* stack size = 0 */
+ 315               	.L__stack_usage = 0
+ 402:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     unsigned char tmptail;
+ 403:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     unsigned char data;
+ 404:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** 
+ 405:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** 
+ 406:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     if ( UART_RxHead == UART_RxTail ) {
+ 317               	.LM31:
+ 318 00e2 9091 0000 		lds r25,UART_RxHead
+ 319 00e6 8091 0000 		lds r24,UART_RxTail
+ 320 00ea 9817      		cp r25,r24
+ 321 00ec 01F0      		breq .L12
+ 407:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****         return UART_NO_DATA;   /* no data available */
+ 408:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     }
+ 409:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     
+ 410:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     /* calculate /store buffer index */
+ 411:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     tmptail = (UART_RxTail + 1) & UART_RX_BUFFER_MASK;
+ 323               	.LM32:
+ 324 00ee E091 0000 		lds r30,UART_RxTail
+ 325 00f2 EF5F      		subi r30,lo8(-(1))
+ 326 00f4 EF71      		andi r30,lo8(31)
+ 412:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     UART_RxTail = tmptail; 
+ 328               	.LM33:
+ 329 00f6 E093 0000 		sts UART_RxTail,r30
+ 413:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     
+ 414:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     /* get data from receive buffer */
+ 415:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     data = UART_RxBuf[tmptail];
+ 331               	.LM34:
+ 332 00fa F0E0      		ldi r31,0
+ 333 00fc E050      		subi r30,lo8(-(UART_RxBuf))
+ 334 00fe F040      		sbci r31,hi8(-(UART_RxBuf))
+ 335 0100 8081      		ld r24,Z
+ 416:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     
+ 417:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     data = (UART_LastRxError << 8) + data;
+ 337               	.LM35:
+ 338 0102 9091 0000 		lds r25,UART_LastRxError
+ 418:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     UART_LastRxError = 0;
+ 340               	.LM36:
+ 341 0106 1092 0000 		sts UART_LastRxError,__zero_reg__
+ 419:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     return data;
+ 343               	.LM37:
+ 344 010a 90E0      		ldi r25,0
+ 345 010c 0895      		ret
+ 346               	.L12:
+ 407:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****         return UART_NO_DATA;   /* no data available */
+ 348               	.LM38:
+ 349 010e 80E0      		ldi r24,0
+ 350 0110 91E0      		ldi r25,lo8(1)
+ 420:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** 
+ 421:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** }/* uart_getc */
+ 352               	.LM39:
+ 353 0112 0895      		ret
+ 359               	.Lscope4:
+ 362               	.global	uart_putc
+ 364               	uart_putc:
+ 422:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** 
+ 423:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** 
+ 424:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** /*************************************************************************
+ 425:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** Function: uart_putc()
+ 426:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** Purpose:  write byte to ringbuffer for transmitting via UART
+ 427:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** Input:    byte to be transmitted
+ 428:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** Returns:  none          
+ 429:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** **************************************************************************/
+ 430:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** void uart_putc(unsigned char data)
+ 431:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** {
+ 366               	.LM40:
+ 367               	.LFBB5:
+ 368               	/* prologue: function */
+ 369               	/* frame size = 0 */
+ 370               	/* stack size = 0 */
+ 371               	.L__stack_usage = 0
+ 432:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     unsigned char tmphead;
+ 433:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** 
+ 434:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     
+ 435:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     tmphead  = (UART_TxHead + 1) & UART_TX_BUFFER_MASK;
+ 373               	.LM41:
+ 374 0114 9091 0000 		lds r25,UART_TxHead
+ 375 0118 9F5F      		subi r25,lo8(-(1))
+ 376 011a 9F71      		andi r25,lo8(31)
+ 377               	.L15:
+ 436:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     
+ 437:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     while ( tmphead == UART_TxTail ){
+ 379               	.LM42:
+ 380 011c 2091 0000 		lds r18,UART_TxTail
+ 381 0120 9217      		cp r25,r18
+ 382 0122 01F0      		breq .L15
+ 438:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****         ;/* wait for free space in buffer */
+ 439:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     }
+ 440:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     
+ 441:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     UART_TxBuf[tmphead] = data;
+ 384               	.LM43:
+ 385 0124 E92F      		mov r30,r25
+ 386 0126 F0E0      		ldi r31,0
+ 387 0128 E050      		subi r30,lo8(-(UART_TxBuf))
+ 388 012a F040      		sbci r31,hi8(-(UART_TxBuf))
+ 389 012c 8083      		st Z,r24
+ 442:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     UART_TxHead = tmphead;
+ 391               	.LM44:
+ 392 012e 9093 0000 		sts UART_TxHead,r25
+ 443:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** 
+ 444:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     /* enable UDRE interrupt */
+ 445:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     UART0_CONTROL    |= _BV(UART0_UDRIE);
+ 394               	.LM45:
+ 395 0132 8091 C100 		lds r24,193
+ 396 0136 8062      		ori r24,lo8(32)
+ 397 0138 8093 C100 		sts 193,r24
+ 398 013c 0895      		ret
+ 403               	.Lscope5:
+ 406               	.global	uart_puts
+ 408               	uart_puts:
+ 446:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** 
+ 447:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** }/* uart_putc */
+ 448:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** 
+ 449:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** 
+ 450:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** /*************************************************************************
+ 451:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** Function: uart_puts()
+ 452:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** Purpose:  transmit string to UART
+ 453:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** Input:    string to be transmitted
+ 454:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** Returns:  none          
+ 455:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** **************************************************************************/
+ 456:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** void uart_puts(const char *s )
+ 457:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** {
+ 410               	.LM46:
+ 411               	.LFBB6:
+ 412 013e CF93      		push r28
+ 413 0140 DF93      		push r29
+ 414               	/* prologue: function */
+ 415               	/* frame size = 0 */
+ 416               	/* stack size = 2 */
+ 417               	.L__stack_usage = 2
+ 418 0142 EC01      		movw r28,r24
+ 419               	.L17:
+ 458:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     while (*s) 
+ 421               	.LM47:
+ 422 0144 8991      		ld r24,Y+
+ 423 0146 8823      		tst r24
+ 424 0148 01F0      		breq .L19
+ 459:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****       uart_putc(*s++);
+ 426               	.LM48:
+ 427 014a 0E94 0000 		call uart_putc
+ 428 014e 00C0      		rjmp .L17
+ 429               	.L19:
+ 430               	/* epilogue start */
+ 460:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** 
+ 461:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** }/* uart_puts */
+ 432               	.LM49:
+ 433 0150 DF91      		pop r29
+ 434 0152 CF91      		pop r28
+ 435 0154 0895      		ret
+ 437               	.Lscope6:
+ 440               	.global	uart_puts_p
+ 442               	uart_puts_p:
+ 462:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** 
+ 463:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** 
+ 464:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** /*************************************************************************
+ 465:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** Function: uart_puts_p()
+ 466:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** Purpose:  transmit string from program memory to UART
+ 467:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** Input:    program memory string to be transmitted
+ 468:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** Returns:  none
+ 469:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** **************************************************************************/
+ 470:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** void uart_puts_p(const char *progmem_s )
+ 471:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** {
+ 444               	.LM50:
+ 445               	.LFBB7:
+ 446 0156 CF93      		push r28
+ 447 0158 DF93      		push r29
+ 448               	/* prologue: function */
+ 449               	/* frame size = 0 */
+ 450               	/* stack size = 2 */
+ 451               	.L__stack_usage = 2
+ 452 015a FC01      		movw r30,r24
+ 453               	.L21:
+ 454               	.LBB2:
+ 472:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     register char c;
+ 473:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     
+ 474:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****     while ( (c = pgm_read_byte(progmem_s++)) ) 
+ 456               	.LM51:
+ 457               	/* #APP */
+ 458               	 ;  474 "/Users/anton/Desktop/AVR/MidiSuit/uart.c" 1
+ 459 015c 8491      		lpm r24, Z
+ 460               		
+ 461               	 ;  0 "" 2
+ 462               	/* #NOAPP */
+ 463 015e EF01      		movw r28,r30
+ 464 0160 2196      		adiw r28,1
+ 465               	.LBE2:
+ 466 0162 8823      		tst r24
+ 467 0164 01F0      		breq .L23
+ 475:/Users/anton/Desktop/AVR/MidiSuit/uart.c ****       uart_putc(c);
+ 469               	.LM52:
+ 470 0166 0E94 0000 		call uart_putc
+ 471 016a FE01      		movw r30,r28
+ 472 016c 00C0      		rjmp .L21
+ 473               	.L23:
+ 474               	/* epilogue start */
+ 476:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** 
+ 477:/Users/anton/Desktop/AVR/MidiSuit/uart.c **** }/* uart_puts_p */
+ 476               	.LM53:
+ 477 016e DF91      		pop r29
+ 478 0170 CF91      		pop r28
+ 479 0172 0895      		ret
+ 484               	.Lscope7:
+ 485               		.local	UART_LastRxError
+ 486               		.comm	UART_LastRxError,1,1
+ 487               		.local	UART_RxTail
+ 488               		.comm	UART_RxTail,1,1
+ 489               		.local	UART_RxHead
+ 490               		.comm	UART_RxHead,1,1
+ 491               		.local	UART_TxTail
+ 492               		.comm	UART_TxTail,1,1
+ 493               		.local	UART_TxHead
+ 494               		.comm	UART_TxHead,1,1
+ 495               		.local	UART_RxBuf
+ 496               		.comm	UART_RxBuf,32,1
+ 497               		.local	UART_TxBuf
+ 498               		.comm	UART_TxBuf,32,1
+ 507               	.Letext0:
+ 508               		.ident	"GCC: (GNU) 4.8.1"
+ 509               	.global __do_clear_bss
+DEFINED SYMBOLS
+                            *ABS*:00000000 uart.c
+/var/folders/d3/vm4w85hd2jvg0pwrffh_xdvw0000gn/T//cchgZQQ9.s:2      *ABS*:0000003e __SP_H__
+/var/folders/d3/vm4w85hd2jvg0pwrffh_xdvw0000gn/T//cchgZQQ9.s:3      *ABS*:0000003d __SP_L__
+/var/folders/d3/vm4w85hd2jvg0pwrffh_xdvw0000gn/T//cchgZQQ9.s:4      *ABS*:0000003f __SREG__
+/var/folders/d3/vm4w85hd2jvg0pwrffh_xdvw0000gn/T//cchgZQQ9.s:5      *ABS*:00000000 __tmp_reg__
+/var/folders/d3/vm4w85hd2jvg0pwrffh_xdvw0000gn/T//cchgZQQ9.s:6      *ABS*:00000001 __zero_reg__
+/var/folders/d3/vm4w85hd2jvg0pwrffh_xdvw0000gn/T//cchgZQQ9.s:109    .text:00000000 __vector_20
+/var/folders/d3/vm4w85hd2jvg0pwrffh_xdvw0000gn/T//cchgZQQ9.s:488    .bss:00000002 UART_RxHead
+/var/folders/d3/vm4w85hd2jvg0pwrffh_xdvw0000gn/T//cchgZQQ9.s:486    .bss:00000001 UART_RxTail
+/var/folders/d3/vm4w85hd2jvg0pwrffh_xdvw0000gn/T//cchgZQQ9.s:494    .bss:00000005 UART_RxBuf
+                             .bss:00000000 UART_LastRxError
+/var/folders/d3/vm4w85hd2jvg0pwrffh_xdvw0000gn/T//cchgZQQ9.s:189    .text:0000005c __vector_21
+/var/folders/d3/vm4w85hd2jvg0pwrffh_xdvw0000gn/T//cchgZQQ9.s:492    .bss:00000004 UART_TxHead
+/var/folders/d3/vm4w85hd2jvg0pwrffh_xdvw0000gn/T//cchgZQQ9.s:490    .bss:00000003 UART_TxTail
+/var/folders/d3/vm4w85hd2jvg0pwrffh_xdvw0000gn/T//cchgZQQ9.s:496    .bss:00000025 UART_TxBuf
+/var/folders/d3/vm4w85hd2jvg0pwrffh_xdvw0000gn/T//cchgZQQ9.s:256    .text:000000b0 uart_init
+/var/folders/d3/vm4w85hd2jvg0pwrffh_xdvw0000gn/T//cchgZQQ9.s:308    .text:000000e2 uart_getc
+/var/folders/d3/vm4w85hd2jvg0pwrffh_xdvw0000gn/T//cchgZQQ9.s:364    .text:00000114 uart_putc
+/var/folders/d3/vm4w85hd2jvg0pwrffh_xdvw0000gn/T//cchgZQQ9.s:408    .text:0000013e uart_puts
+/var/folders/d3/vm4w85hd2jvg0pwrffh_xdvw0000gn/T//cchgZQQ9.s:442    .text:00000156 uart_puts_p
+
+UNDEFINED SYMBOLS
+__do_clear_bss
